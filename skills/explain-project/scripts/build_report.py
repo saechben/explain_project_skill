@@ -12,8 +12,11 @@ import json
 import sys
 from pathlib import Path
 
+import code_inline
+
 FACTS_PLACEHOLDER = "__FACTS_JSON__"
 NARRATIVE_PLACEHOLDER = "__NARRATIVE_JSON__"
+CODE_PLACEHOLDER = "__CODE_JSON__"
 
 DEFAULT_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "report.html.tmpl"
 
@@ -29,10 +32,13 @@ def _inline_json(data: dict) -> str:
     return serialized.replace("</", "<\\/")
 
 
-def build_report(facts: dict, narrative: dict, template: str) -> str:
-    """Return a complete standalone HTML document with facts and narrative inlined."""
+def build_report(facts: dict, narrative: dict, template: str, code: dict | None = None) -> str:
+    """Return a complete standalone HTML document with facts, narrative, and the
+    referenced-file code blob inlined. ``code`` defaults to an empty mapping so the
+    legacy 3-argument call still produces a valid report."""
     html = template.replace(FACTS_PLACEHOLDER, _inline_json(facts))
     html = html.replace(NARRATIVE_PLACEHOLDER, _inline_json(narrative))
+    html = html.replace(CODE_PLACEHOLDER, _inline_json(code or {}))
     return html
 
 
@@ -44,6 +50,11 @@ def main(argv=None) -> int:
     parser.add_argument("--narrative", required=True, help="Path to narrative.json")
     parser.add_argument("--out", required=True, help="Path to write report.html")
     parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repo root for inlining referenced file contents (default: facts.repo.root)",
+    )
+    parser.add_argument(
         "--template",
         default=str(DEFAULT_TEMPLATE),
         help="Path to the HTML template (default: bundled report.html.tmpl)",
@@ -54,7 +65,10 @@ def main(argv=None) -> int:
     narrative = json.loads(Path(args.narrative).read_text(encoding="utf-8"))
     template = Path(args.template).read_text(encoding="utf-8")
 
-    html = build_report(facts, narrative, template)
+    repo_root = args.repo or (facts.get("repo", {}) or {}).get("root") or "."
+    code = code_inline.collect(facts, narrative, repo_root)
+
+    html = build_report(facts, narrative, template, code=code)
     Path(args.out).write_text(html, encoding="utf-8")
     return 0
 
