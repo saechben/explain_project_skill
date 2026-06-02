@@ -45,23 +45,45 @@ entrypoints, external dependencies, git signals, and an `extractionReport`.
 
 1. **Read `facts.json` first** — not raw code. Form a structural picture from real data:
    the modules, the edge graph, entrypoints, external deps, the git coupling.
-2. **Cluster** modules/files into subsystems. **Decide how many abstraction tiers fit
-   THIS repo** and name them. Use the C4 vocabulary (Context → Container → Component →
-   Code) as a mental guide, but adapt — a tiny library may need 2 tiers; a large
-   monorepo may need 4. Heuristic: tier 0 should have ~3–7 legible nodes a non-author
-   can grasp; add a tier whenever a node would otherwise back >~15 files.
-3. **Confirm labels with targeted code reading** — READMEs, entrypoint files, one or two
+2. **Choose 2–4 perspectives (lenses) that fit THIS repo.** The real value is letting a
+   reader change *what the map is about*, not just zoom. Pick from this palette only the
+   ones the facts can actually support, and name each:
+   - **Structural / Code** (`kind: "structural"`) — modules and the import/dependency
+     graph. Almost always include this; it is the most grounded lens.
+   - **Functional / Capability** (`kind: "functional"`) — group by what the system *does*,
+     seeded by entrypoints (each entrypoint roots a capability), call-adjacency via the
+     import graph, and git-coupling ("changes together").
+   - **Data-flow** (`kind: "dataflow"`) — follow data from entrypoints through modules to
+     external deps/IO, using import edges as the flow skeleton.
+   - **Runtime / Deployment** (`kind: "runtime"`) — processes/services/CLIs, seeded by
+     entrypoint `kind` and manifest scripts.
+   - **Domain / Business** (`kind: "domain"`) — domain areas inferred from directory and
+     dependency naming. This lens is the *least* grounded; expect mostly interpretation.
+   Don't force a lens with no signal (e.g. no Domain lens for a tiny CLI). Skipping a lens
+   is better than fabricating one.
+3. **Per lens, build the node tree.** Decide how many tiers fit (C4 — Context → Container →
+   Component → Code — as a mental guide, adapted). Heuristic: tier 0 should have ~3–7
+   legible nodes; add a tier whenever a node would otherwise back >~15 files. Node ids must
+   be unique *within* a perspective; relationships connect nodes *within the same* lens.
+4. **Confirm labels with targeted code reading** — READMEs, entrypoint files, one or two
    representative files per cluster. Do NOT read everything.
    - Confirmed by code/docs → `confidence: "high"`, `interpretation: false`.
    - Inferred from names/structure only → `confidence: "medium"|"low"`,
      `interpretation: true`, and say so in the `description`.
-4. **Write `narrative.json`** (schema: `schema/narrative.schema.json`) referencing facts
-   IDs:
+   - Interpretive lenses (functional/domain) will skew toward `medium`/`low` — that is
+     expected and honest. The **Verified-only** toggle hides them, so the Structural lens
+     must still stand on its own as a coherent, fully-grounded spine.
+5. **Write `narrative.json`** (schema: `schema/narrative.schema.json`), v2 shape:
+   ```jsonc
+   { "schemaVersion": "2.0", "basedOnFactsCommit": "<facts.repo.headCommit>",
+     "perspectives": [ { "id","name","kind","description","tiers","nodes","relationships" } ],
+     "openQuestions": [] }
+   ```
    - Every node's `factRefs` must reference ≥1 real `moduleIds`/`fileIds` from
      `facts.json` — UNLESS it is explicitly `interpretation: true` + `confidence: "low"`
      with a written justification in `description`.
-   - Every relationship's `factEdgeIds` must reference real `edges[].id` from
-     `facts.json`.
+   - Every relationship's `factEdgeIds` must reference real `edges[].id`; `from`/`to` must
+     be node ids in the same perspective.
    - `basedOnFactsCommit` must equal `facts.repo.headCommit`.
    - Put genuine unknowns in `openQuestions` rather than guessing.
 

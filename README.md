@@ -52,10 +52,21 @@ python skills/explain-project/scripts/verify.py \
   --repo /path/to/repo
 ```
 
-Open `report.html` in a browser: pan/zoom the graph, click a node to drill into its
-children down to real files, inspect provenance and confidence in the side panel, toggle
-**verified-only** to hide all interpretation and see only deterministically-grounded
-structure, and read the coverage banner for the map's limits.
+Open `report.html` in a browser:
+
+- **Switch perspectives** — the report carries 2–4 adaptive lenses (Structural,
+  Functional, Domain, …), each a separate grounded narrative over the *same* facts.
+  Switching changes *what the map is about*, not just the zoom.
+- **Floaty graph** — a continuous physics layout; hovering a node makes it react (scale,
+  glow, neighbor highlight) and pops a hover-card with quick facts and actions.
+- **Ask about a component** — *Ask* composes a fact-grounded prompt (component label, its
+  real file/edge IDs, repo) and copies it to your clipboard to paste back into Claude
+  Code. The report stays fully offline — no embedded keys, no server.
+- **View referenced code** — click a backing file to open a read-only, syntax-highlighted
+  viewer. Only referenced files are inlined (size-capped), so the report stays self-contained.
+- **Drill down** to real files, inspect provenance/confidence in the side panel, toggle
+  **verified-only** to hide all interpretation and see only deterministically-grounded
+  structure, and read the coverage banner (overall and per-lens) for the map's limits.
 
 ## Anti-hallucination guarantees (verified by `verify.py`)
 
