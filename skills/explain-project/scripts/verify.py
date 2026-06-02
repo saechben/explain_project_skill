@@ -13,11 +13,31 @@ import pathlib
 import sys
 
 
+def _perspectives(narrative: dict) -> list[dict]:
+    """Normalize a narrative to a list of perspectives.
+
+    v2 narratives carry a ``perspectives`` array. A legacy v1 narrative (root-level
+    ``tiers``/``nodes``/``relationships``) is wrapped as a single ``default``
+    perspective so every check below runs identically against both shapes.
+    """
+    if narrative.get("perspectives") is not None:
+        return narrative.get("perspectives") or []
+    return [{
+        "id": "default",
+        "name": "Overview",
+        "kind": "structural",
+        "tiers": narrative.get("tiers", []) or [],
+        "nodes": narrative.get("nodes", []) or [],
+        "relationships": narrative.get("relationships", []) or [],
+    }]
+
+
 def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) -> dict:
     """Run all anti-hallucination checks and return a machine-readable report.
 
     Returns a dict with keys: status, errors, warnings, coverage.
-    status is "FAIL" iff errors is non-empty.
+    status is "FAIL" iff errors is non-empty. Each perspective is validated
+    independently against the shared facts.
     """
     errors: list[dict] = []
     warnings: list[dict] = []
@@ -25,8 +45,6 @@ def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) 
     files = facts.get("files", []) or []
     modules = facts.get("modules", []) or []
     edges = facts.get("edges", []) or []
-    nodes = narrative.get("nodes", []) or []
-    relationships = narrative.get("relationships", []) or []
 
     file_ids = {f.get("id") for f in files}
     module_ids = {m.get("id") for m in modules}
@@ -35,67 +53,134 @@ def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) 
     file_path_by_id = {f.get("id"): f.get("path") for f in files}
     module_file_ids = {m.get("id"): set(m.get("fileIds", []) or []) for m in modules}
 
-    # --- Check 1: referential integrity ---
-    for node in nodes:
-        refs = node.get("factRefs", {}) or {}
-        nid = node.get("id")
-        for fid in refs.get("fileIds", []) or []:
-            if fid not in file_ids:
+    perspectives = _perspectives(narrative)
+
+    # --- Structural check: unique perspective ids ---
+    seen_pids: set = set()
+    for p in perspectives:
+        pid = p.get("id")
+        if pid in seen_pids:
+            errors.append({
+                "check": "perspective-ids",
+                "message": f"duplicate perspective id {pid!r}",
+            })
+        seen_pids.add(pid)
+
+    if repo_root is not None:
+        repo_root = pathlib.Path(repo_root)
+
+    covered_all: set = set()
+    per_perspective_cov: list[dict] = []
+    total_files = len(file_ids)
+    total_nodes = 0
+
+    for p in perspectives:
+        pid = p.get("id")
+        nodes = p.get("nodes", []) or []
+        relationships = p.get("relationships", []) or []
+        total_nodes += len(nodes)
+        node_ids = {n.get("id") for n in nodes}
+
+        # --- Structural check: unique node ids within the perspective ---
+        seen_nids: set = set()
+        for n in nodes:
+            nid = n.get("id")
+            if nid in seen_nids:
                 errors.append({
-                    "check": "referential-integrity",
-                    "message": f"node {nid!r} references unknown fileId {fid!r}",
+                    "check": "node-ids",
+                    "message": f"[{pid}] duplicate node id {nid!r}",
                 })
-        for mid in refs.get("moduleIds", []) or []:
-            if mid not in module_ids:
+            seen_nids.add(nid)
+
+        # --- Check 1: referential integrity ---
+        for node in nodes:
+            refs = node.get("factRefs", {}) or {}
+            nid = node.get("id")
+            for fid in refs.get("fileIds", []) or []:
+                if fid not in file_ids:
+                    errors.append({
+                        "check": "referential-integrity",
+                        "message": f"[{pid}] node {nid!r} references unknown fileId {fid!r}",
+                    })
+            for mid in refs.get("moduleIds", []) or []:
+                if mid not in module_ids:
+                    errors.append({
+                        "check": "referential-integrity",
+                        "message": f"[{pid}] node {nid!r} references unknown moduleId {mid!r}",
+                    })
+        for rel in relationships:
+            for eid in rel.get("factEdgeIds", []) or []:
+                if eid not in edge_ids:
+                    errors.append({
+                        "check": "referential-integrity",
+                        "message": (
+                            f"[{pid}] relationship {rel.get('from')!r}->{rel.get('to')!r} "
+                            f"references unknown factEdgeId {eid!r}"
+                        ),
+                    })
+            # relationship endpoints must be nodes in THIS perspective
+            for end in ("from", "to"):
+                ref = rel.get(end)
+                if ref not in node_ids:
+                    errors.append({
+                        "check": "relationship-endpoints",
+                        "message": (
+                            f"[{pid}] relationship {end} {ref!r} is not a node in this perspective"
+                        ),
+                    })
+
+        # --- Check 2: no empty grounding ---
+        for node in nodes:
+            refs = node.get("factRefs", {}) or {}
+            has_refs = bool(refs.get("fileIds")) or bool(refs.get("moduleIds"))
+            allowed_interpretation = (
+                node.get("interpretation") is True
+                and node.get("confidence") == "low"
+                and bool(node.get("description"))
+            )
+            if not has_refs and not allowed_interpretation:
                 errors.append({
-                    "check": "referential-integrity",
-                    "message": f"node {nid!r} references unknown moduleId {mid!r}",
-                })
-    for rel in relationships:
-        for eid in rel.get("factEdgeIds", []) or []:
-            if eid not in edge_ids:
-                errors.append({
-                    "check": "referential-integrity",
+                    "check": "empty-grounding",
                     "message": (
-                        f"relationship {rel.get('from')!r}->{rel.get('to')!r} "
-                        f"references unknown factEdgeId {eid!r}"
+                        f"[{pid}] node {node.get('id')!r} has no factRefs and is not a "
+                        "low-confidence interpretation"
                     ),
                 })
 
-    # --- Check 2: no empty grounding ---
-    for node in nodes:
-        refs = node.get("factRefs", {}) or {}
-        has_refs = bool(refs.get("fileIds")) or bool(refs.get("moduleIds"))
-        allowed_interpretation = (
-            node.get("interpretation") is True
-            and node.get("confidence") == "low"
-            and bool(node.get("description"))
-        )
-        if not has_refs and not allowed_interpretation:
-            errors.append({
-                "check": "empty-grounding",
-                "message": (
-                    f"node {node.get('id')!r} has no factRefs and is not a "
-                    "low-confidence interpretation"
-                ),
-            })
+        # --- Check 3: file existence (only when repo_root given) ---
+        if repo_root is not None:
+            referenced_file_ids: set = set()
+            for node in nodes:
+                refs = node.get("factRefs", {}) or {}
+                referenced_file_ids.update(refs.get("fileIds", []) or [])
+            for fid in sorted(referenced_file_ids):
+                path = file_path_by_id.get(fid)
+                if path is None:
+                    continue  # caught by referential integrity
+                if not (repo_root / path).exists():
+                    errors.append({
+                        "check": "file-existence",
+                        "message": f"[{pid}] fileId {fid!r} path {path!r} does not exist under repo root",
+                    })
 
-    # --- Check 3: file existence (only when repo_root given) ---
-    if repo_root is not None:
-        repo_root = pathlib.Path(repo_root)
-        referenced_file_ids: set = set()
+        # --- Check 5: coverage sanity (reported, never a failure) ---
+        covered_p: set = set()
         for node in nodes:
             refs = node.get("factRefs", {}) or {}
-            referenced_file_ids.update(refs.get("fileIds", []) or [])
-        for fid in sorted(referenced_file_ids):
-            path = file_path_by_id.get(fid)
-            if path is None:
-                continue  # caught by referential integrity
-            if not (repo_root / path).exists():
-                errors.append({
-                    "check": "file-existence",
-                    "message": f"fileId {fid!r} path {path!r} does not exist under repo root",
-                })
+            for fid in refs.get("fileIds", []) or []:
+                if fid in file_ids:
+                    covered_p.add(fid)
+            for mid in refs.get("moduleIds", []) or []:
+                for fid in module_file_ids.get(mid, set()):
+                    if fid in file_ids:
+                        covered_p.add(fid)
+        covered_all |= covered_p
+        per_perspective_cov.append({
+            "id": pid,
+            "nodeCount": len(nodes),
+            "filesCoveredByNode": len(covered_p),
+            "fileCoveragePct": round(100.0 * len(covered_p) / total_files, 2) if total_files else 0.0,
+        })
 
     # --- Check 4: commit match (warning only) ---
     based_on = narrative.get("basedOnFactsCommit")
@@ -109,29 +194,17 @@ def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) 
             ),
         })
 
-    # --- Check 5: coverage sanity (reported, never a failure) ---
-    covered: set = set()
-    for node in nodes:
-        refs = node.get("factRefs", {}) or {}
-        for fid in refs.get("fileIds", []) or []:
-            if fid in file_ids:
-                covered.add(fid)
-        for mid in refs.get("moduleIds", []) or []:
-            for fid in module_file_ids.get(mid, set()):
-                if fid in file_ids:
-                    covered.add(fid)
-
-    total_files = len(file_ids)
-    files_covered = len(covered)
+    files_covered = len(covered_all)
     coverage_pct = round(100.0 * files_covered / total_files, 2) if total_files else 0.0
     unresolved_edges = sum(1 for e in edges if e.get("resolution") == "unresolved")
 
     coverage = {
-        "nodeCount": len(nodes),
+        "nodeCount": total_nodes,
         "filesCoveredByNode": files_covered,
         "totalFiles": total_files,
         "fileCoveragePct": coverage_pct,
         "unresolvedEdges": unresolved_edges,
+        "perspectives": per_perspective_cov,
     }
 
     return {
