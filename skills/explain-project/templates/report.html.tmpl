@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>explain-project report</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #181b24; --line: #2a2f3a; --fg: #e6e9ef; --muted: #9aa3b2;
+    --high: #3fb950; --medium: #d29922; --low: #f85149; --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+         background: var(--bg); color: var(--fg); }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 16px; }
+  #banner { padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12px;
+            color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  #banner b { color: var(--fg); }
+  #toolbar { padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex;
+             align-items: center; gap: 14px; flex-wrap: wrap; }
+  #breadcrumb { font-size: 13px; color: var(--muted); }
+  #breadcrumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  button { background: #21262d; color: var(--fg); border: 1px solid var(--line);
+           border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  #main { display: flex; height: calc(100vh - 200px); min-height: 380px; }
+  #cy { flex: 1; min-width: 0; }
+  #offline { padding: 16px; color: var(--low); display: none; }
+  #panel { width: 340px; border-left: 1px solid var(--line); background: var(--panel);
+           padding: 14px 16px; overflow: auto; }
+  #panel h2 { margin: 0 0 4px; font-size: 15px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+           color: #0b0e14; font-weight: 600; }
+  .badge.high { background: var(--high); } .badge.medium { background: var(--medium); }
+  .badge.low { background: var(--low); }
+  .badge.interp { background: var(--accent); }
+  .section { margin-top: 12px; }
+  .section h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase;
+                letter-spacing: .05em; color: var(--muted); }
+  .section ul { margin: 0; padding-left: 16px; }
+  code { color: var(--accent); }
+  #legend { padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px;
+            color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         margin-right: 4px; vertical-align: middle; }
+  label.toggle { font-size: 13px; cursor: pointer; user-select: none; }
+</style>
+</head>
+<body>
+<header><h1>explain-project &mdash; explorable report</h1></header>
+
+<div id="banner" aria-label="coverage"></div>
+
+<div id="toolbar">
+  <button id="back" disabled>&larr; Back</button>
+  <span id="breadcrumb"></span>
+  <label class="toggle"><input type="checkbox" id="verifiedOnly"> Verified only</label>
+</div>
+
+<div id="main">
+  <div id="cy"></div>
+  <div id="offline">Cytoscape.js failed to load (offline?). Graph rendering unavailable;
+    data is still inlined below for inspection.</div>
+  <aside id="panel"><em>Select a node to inspect its provenance.</em></aside>
+</div>
+
+<div id="legend">
+  <span><b>Confidence:</b></span>
+  <span><span class="dot" style="background:var(--high)"></span>high</span>
+  <span><span class="dot" style="background:var(--medium)"></span>medium</span>
+  <span><span class="dot" style="background:var(--low)"></span>low</span>
+  <span><b>Edges:</b> labeled relationships (narrative)</span>
+  <span><b>Tier:</b> nodes drill down into children</span>
+</div>
+
+<!-- Inlined data. The page renders ONLY what is present in these blobs. -->
+<script id="facts" type="application/json">__FACTS_JSON__</script>
+<script id="narrative" type="application/json">__NARRATIVE_JSON__</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var FACTS = JSON.parse(document.getElementById("facts").textContent);
+  var NARRATIVE = JSON.parse(document.getElementById("narrative").textContent);
+
+  // ---- Indexes -------------------------------------------------------------
+  var nodeById = {};
+  (NARRATIVE.nodes || []).forEach(function (n) { nodeById[n.id] = n; });
+  var fileById = {};
+  (FACTS.files || []).forEach(function (f) { fileById[f.id] = f; });
+  var moduleById = {};
+  (FACTS.modules || []).forEach(function (m) { moduleById[m.id] = m; });
+
+  function relsFor(id) {
+    var out = [], inb = [];
+    (NARRATIVE.relationships || []).forEach(function (r) {
+      if (r.from === id) out.push(r);
+      if (r.to === id) inb.push(r);
+    });
+    return { out: out, inb: inb };
+  }
+
+  function verifiedOnly() {
+    var el = document.getElementById("verifiedOnly");
+    return el && el.checked;
+  }
+  function hidden(n) {
+    return verifiedOnly() && (n.interpretation === true || n.confidence === "low");
+  }
+
+  // ---- Coverage banner -----------------------------------------------------
+  (function banner() {
+    var er = FACTS.extractionReport || {};
+    var b = document.getElementById("banner");
+    function item(label, val) {
+      var s = document.createElement("span");
+      s.innerHTML = "<b>" + label + ":</b> ";
+      s.appendChild(document.createTextNode(val));
+      return s;
+    }
+    b.appendChild(item("Languages", (er.languagesDetected || []).join(", ") || "—"));
+    b.appendChild(item("Imports resolved", String(er.importEdgesResolved != null ? er.importEdgesResolved : "—")));
+    b.appendChild(item("Imports unresolved", String(er.importEdgesUnresolved != null ? er.importEdgesUnresolved : "—")));
+    b.appendChild(item("Ecosystem tools", (er.ecosystemToolsUsed || []).join(", ") || "—"));
+    b.appendChild(item("Skipped", (er.skipped || []).join(", ") || "—"));
+  })();
+
+  // ---- Side panel ----------------------------------------------------------
+  function esc(t) {
+    var d = document.createElement("div");
+    d.textContent = t == null ? "" : String(t);
+    return d.innerHTML;
+  }
+  function renderPanel(id) {
+    var n = nodeById[id];
+    var p = document.getElementById("panel");
+    if (!n) { p.innerHTML = "<em>Select a node to inspect its provenance.</em>"; return; }
+    var rel = relsFor(id);
+    var refs = n.factRefs || {};
+    var fileList = (refs.fileIds || []).map(function (fid) {
+      var f = fileById[fid];
+      return "<li><code>" + esc(f ? f.path : fid) + "</code></li>";
+    }).join("");
+    var modList = (refs.moduleIds || []).map(function (mid) {
+      var m = moduleById[mid];
+      return "<li><code>" + esc(m ? m.path : mid) + "</code></li>";
+    }).join("");
+    var outList = rel.out.map(function (r) {
+      return "<li>" + esc(r.label) + " &rarr; <code>" + esc((nodeById[r.to] || {}).label || r.to) + "</code></li>";
+    }).join("");
+    var inbList = rel.inb.map(function (r) {
+      return "<li><code>" + esc((nodeById[r.from] || {}).label || r.from) + "</code> &rarr; " + esc(r.label) + "</li>";
+    }).join("");
+    var conf = esc(n.confidence || "");
+    var html =
+      '<h2>' + esc(n.label) + '</h2>' +
+      '<div><span class="badge ' + conf + '">' + conf + '</span>' +
+      (n.interpretation ? ' <span class="badge interp">interpretation</span>' : '') + '</div>' +
+      '<div class="section"><h3>Description</h3><div>' + esc(n.description) + '</div></div>' +
+      '<div class="section"><h3>Backing modules</h3><ul>' + (modList || "<li><em>none</em></li>") + '</ul></div>' +
+      '<div class="section"><h3>Backing files</h3><ul>' + (fileList || "<li><em>none</em></li>") + '</ul></div>' +
+      '<div class="section"><h3>Outbound</h3><ul>' + (outList || "<li><em>none</em></li>") + '</ul></div>' +
+      '<div class="section"><h3>Inbound</h3><ul>' + (inbList || "<li><em>none</em></li>") + '</ul></div>';
+    if (!(n.children && n.children.length)) {
+      html += '<div class="section"><h3>Leaf node</h3><div>This node has no children; the files above are the backing implementation.</div></div>';
+    }
+    p.innerHTML = html;
+  }
+
+  // ---- Graph + drill-down --------------------------------------------------
+  var cy = null;
+  var stack = [];  // breadcrumb of parent node ids; [] === tier-0 view
+
+  function currentChildren() {
+    if (stack.length === 0) {
+      return (NARRATIVE.nodes || []).filter(function (n) { return n.tier === 0; });
+    }
+    var parent = nodeById[stack[stack.length - 1]];
+    return (parent.children || []).map(function (cid) { return nodeById[cid]; })
+                                  .filter(Boolean);
+  }
+
+  function renderBreadcrumb() {
+    var bc = document.getElementById("breadcrumb");
+    var parts = ['<a data-depth="0">System</a>'];
+    stack.forEach(function (id, i) {
+      parts.push(' / <a data-depth="' + (i + 1) + '">' + esc((nodeById[id] || {}).label || id) + '</a>');
+    });
+    bc.innerHTML = parts.join("");
+    Array.prototype.forEach.call(bc.querySelectorAll("a"), function (a) {
+      a.addEventListener("click", function () {
+        stack = stack.slice(0, parseInt(a.getAttribute("data-depth"), 10));
+        draw();
+      });
+    });
+    document.getElementById("back").disabled = stack.length === 0;
+  }
+
+  function draw() {
+    renderBreadcrumb();
+    if (!cy) return;
+    var nodes = currentChildren().filter(function (n) { return !hidden(n); });
+    var ids = {};
+    nodes.forEach(function (n) { ids[n.id] = true; });
+    var els = nodes.map(function (n) {
+      return { data: { id: n.id, label: n.label, conf: n.confidence,
+                       interp: n.interpretation ? "yes" : "no",
+                       drill: (n.children && n.children.length) ? "yes" : "no" } };
+    });
+    (NARRATIVE.relationships || []).forEach(function (r) {
+      if (ids[r.from] && ids[r.to]) {
+        els.push({ data: { id: "rel_" + r.from + "_" + r.to, source: r.from,
+                           target: r.to, label: r.label } });
+      }
+    });
+    cy.elements().remove();
+    cy.add(els);
+    cy.layout({ name: "cose", animate: false, padding: 30 }).run();
+  }
+
+  function initGraph() {
+    cy = cytoscape({
+      container: document.getElementById("cy"),
+      style: [
+        { selector: "node", style: {
+            "label": "data(label)", "color": "#e6e9ef", "font-size": "11px",
+            "text-valign": "center", "text-halign": "center", "text-wrap": "wrap",
+            "text-max-width": "90px", "width": "70px", "height": "70px",
+            "border-width": 2, "border-color": "#0b0e14",
+            "background-color": "#444c5a" } },
+        { selector: 'node[conf="high"]', style: { "background-color": "#3fb950" } },
+        { selector: 'node[conf="medium"]', style: { "background-color": "#d29922" } },
+        { selector: 'node[conf="low"]', style: { "background-color": "#f85149" } },
+        { selector: 'node[drill="yes"]', style: { "border-color": "#58a6ff", "border-width": 4 } },
+        { selector: 'node[interp="yes"]', style: { "border-style": "dashed" } },
+        { selector: "edge", style: {
+            "label": "data(label)", "font-size": "9px", "color": "#9aa3b2",
+            "width": 1.5, "line-color": "#586069", "target-arrow-color": "#586069",
+            "target-arrow-shape": "triangle", "curve-style": "bezier" } },
+      ],
+    });
+    cy.on("tap", "node", function (evt) {
+      var n = nodeById[evt.target.id()];
+      renderPanel(evt.target.id());
+      if (n && n.children && n.children.length) {
+        stack.push(n.id);
+        draw();
+      }
+    });
+    draw();
+  }
+
+  document.getElementById("back").addEventListener("click", function () {
+    if (stack.length) { stack.pop(); draw(); }
+  });
+  document.getElementById("verifiedOnly").addEventListener("change", draw);
+
+  if (typeof cytoscape === "undefined") {
+    document.getElementById("offline").style.display = "block";
+    document.getElementById("cy").style.display = "none";
+    renderBreadcrumb();
+  } else {
+    initGraph();
+  }
+})();
+</script>
+</body>
+</html>
