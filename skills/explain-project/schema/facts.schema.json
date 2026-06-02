@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://explain-project/facts.schema.json",
+  "title": "facts.json",
+  "description": "Deterministically extracted structural skeleton of a repository. Never written by the model.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repo", "files", "modules", "edges", "entrypoints", "externalDependencies", "gitCoupling", "extractionReport"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "headCommit", "branch", "generatedAt", "totalFiles", "totalLoc"],
+      "properties": {
+        "root": { "type": "string" },
+        "headCommit": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"] },
+        "generatedAt": { "type": "string" },
+        "totalFiles": { "type": "integer", "minimum": 0 },
+        "totalLoc": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "lang", "loc", "sizeBytes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^f[0-9]+$" },
+          "path": { "type": "string" },
+          "lang": { "type": "string" },
+          "loc": { "type": "integer", "minimum": 0 },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "churn": { "type": "integer", "minimum": 0 },
+          "lastModified": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "fileIds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^m[0-9]+$" },
+          "path": { "type": "string" },
+          "fileIds": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "from", "to", "evidence", "resolution", "extractor"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^e[0-9]+$" },
+          "type": { "type": "string", "enum": ["import", "dependency"] },
+          "from": { "type": "string" },
+          "to": { "type": ["string", "null"] },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "line", "raw"],
+            "properties": {
+              "file": { "type": "string" },
+              "line": { "type": "integer", "minimum": 0 },
+              "raw": { "type": "string" }
+            }
+          },
+          "resolution": { "type": "string", "enum": ["resolved", "unresolved"] },
+          "extractor": { "type": "string", "enum": ["treesitter", "heuristic", "dependency-cruiser", "pydeps"] }
+        }
+      }
+    },
+    "entrypoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileId", "kind", "evidence"],
+        "properties": {
+          "fileId": { "type": "string" },
+          "kind": { "type": "string", "enum": ["cli", "web", "service", "lib", "test"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "externalDependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "ecosystem", "manifest"],
+        "properties": {
+          "name": { "type": "string" },
+          "version": { "type": ["string", "null"] },
+          "ecosystem": { "type": "string" },
+          "manifest": { "type": "string" },
+          "usedByFileIds": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "gitCoupling": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["a", "b", "coChangeCount"],
+        "properties": {
+          "a": { "type": "string" },
+          "b": { "type": "string" },
+          "coChangeCount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "extractionReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["languagesDetected", "importEdgesResolved", "importEdgesUnresolved", "ecosystemToolsUsed", "skipped", "warnings"],
+      "properties": {
+        "languagesDetected": { "type": "array", "items": { "type": "string" } },
+        "importEdgesResolved": { "type": "integer", "minimum": 0 },
+        "importEdgesUnresolved": { "type": "integer", "minimum": 0 },
+        "ecosystemToolsUsed": { "type": "array", "items": { "type": "string" } },
+        "skipped": { "type": "array", "items": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
