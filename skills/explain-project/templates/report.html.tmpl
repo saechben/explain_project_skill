@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>explain-project report</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
   :root {
     --bg: #0f1117; --panel: #181b24; --line: #2a2f3a; --fg: #e6e9ef; --muted: #9aa3b2;
@@ -17,6 +18,15 @@
   #banner { padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12px;
             color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
   #banner b { color: var(--fg); }
+  #perspectives { padding: 8px 16px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  .ptab { background: #1b2030; color: var(--muted); border: 1px solid var(--line);
+          border-radius: 999px; padding: 5px 14px; cursor: pointer; font-size: 13px;
+          transition: all .15s ease; }
+  .ptab:hover { color: var(--fg); border-color: var(--accent); }
+  .ptab.active { color: #0b0e14; background: var(--accent); border-color: var(--accent);
+                 font-weight: 600; }
+  .ptab small { opacity: .7; font-weight: 400; }
+  #pdesc { padding: 4px 16px 0; font-size: 12px; color: var(--muted); }
   #toolbar { padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex;
              align-items: center; gap: 14px; flex-wrap: wrap; }
   #breadcrumb { font-size: 13px; color: var(--muted); }
@@ -24,7 +34,7 @@
   button { background: #21262d; color: var(--fg); border: 1px solid var(--line);
            border-radius: 6px; padding: 4px 10px; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
-  #main { display: flex; height: calc(100vh - 200px); min-height: 380px; }
+  #main { display: flex; height: calc(100vh - 250px); min-height: 360px; position: relative; }
   #cy { flex: 1; min-width: 0; }
   #offline { padding: 16px; color: var(--low); display: none; }
   #panel { width: 340px; border-left: 1px solid var(--line); background: var(--panel);
@@ -39,18 +49,56 @@
   .section h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase;
                 letter-spacing: .05em; color: var(--muted); }
   .section ul { margin: 0; padding-left: 16px; }
+  .filerow { display: flex; align-items: center; gap: 6px; }
+  .filerow code { color: var(--accent); }
+  .chip { background: #21262d; border: 1px solid var(--line); color: var(--fg);
+          border-radius: 6px; padding: 1px 8px; font-size: 11px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
   code { color: var(--accent); }
   #legend { padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px;
             color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
          margin-right: 4px; vertical-align: middle; }
   label.toggle { font-size: 13px; cursor: pointer; user-select: none; }
+
+  /* hover-card */
+  #hovercard { position: absolute; z-index: 30; min-width: 180px; max-width: 260px;
+               background: #11151f; border: 1px solid var(--accent); border-radius: 8px;
+               padding: 8px 10px; box-shadow: 0 8px 28px rgba(0,0,0,.55); display: none;
+               pointer-events: auto; }
+  #hovercard h4 { margin: 0 0 4px; font-size: 13px; }
+  #hovercard .meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  #hovercard .actions { display: flex; gap: 6px; }
+
+  /* toast */
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+           background: #11151f; border: 1px solid var(--accent); color: var(--fg);
+           padding: 8px 14px; border-radius: 8px; font-size: 13px; display: none; z-index: 60; }
+
+  /* modal (code viewer + manual-copy) */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50;
+           display: none; align-items: center; justify-content: center; }
+  .modal.open { display: flex; }
+  .modal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+                width: min(900px, 92vw); max-height: 86vh; display: flex; flex-direction: column; }
+  .modal .head { display: flex; align-items: center; justify-content: space-between;
+                 padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .modal .head h3 { margin: 0; font-size: 14px; }
+  .modal .body { overflow: auto; padding: 0; }
+  .modal pre { margin: 0; padding: 12px 14px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .modal pre code { color: inherit; }
+  .notice { color: var(--medium); font-size: 12px; padding: 6px 14px; }
+  textarea.copybox { width: 100%; height: 160px; background: #0d1017; color: var(--fg);
+                     border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+                     font: 12px/1.5 ui-monospace, monospace; }
 </style>
 </head>
 <body>
 <header><h1>explain-project &mdash; explorable report</h1></header>
 
 <div id="banner" aria-label="coverage"></div>
+<div id="perspectives" aria-label="perspectives"></div>
+<div id="pdesc"></div>
 
 <div id="toolbar">
   <button id="back" disabled>&larr; Back</button>
@@ -63,6 +111,7 @@
   <div id="offline">Cytoscape.js failed to load (offline?). Graph rendering unavailable;
     data is still inlined below for inspection.</div>
   <aside id="panel"><em>Select a node to inspect its provenance.</em></aside>
+  <div id="hovercard"></div>
 </div>
 
 <div id="legend">
@@ -72,6 +121,27 @@
   <span><span class="dot" style="background:var(--low)"></span>low</span>
   <span><b>Edges:</b> labeled relationships (narrative)</span>
   <span><b>Tier:</b> nodes drill down into children</span>
+  <span><b>Lens:</b> switch perspective above; <i>Verified only</i> hides interpretation</span>
+</div>
+
+<div id="toast"></div>
+
+<div id="codeviewer" class="modal">
+  <div class="box">
+    <div class="head"><h3 id="cvtitle">code</h3><button id="cvclose">Close</button></div>
+    <div id="cvnotice" class="notice" style="display:none"></div>
+    <div class="body"><pre><code id="cvcode"></code></pre></div>
+  </div>
+</div>
+
+<div id="copymodal" class="modal">
+  <div class="box">
+    <div class="head"><h3>Copy this prompt</h3><button id="cmclose">Close</button></div>
+    <div class="body" style="padding:12px 14px">
+      <div class="notice" style="display:block">Clipboard was blocked (common for file:// pages). Select all and copy, then paste into Claude Code.</div>
+      <textarea class="copybox" id="cmtext" readonly></textarea>
+    </div>
+  </div>
 </div>
 
 <!-- Inlined data. The page renders ONLY what is present in these blobs. -->
@@ -80,15 +150,34 @@
 <script id="code" type="application/json">__CODE_JSON__</script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-cola/2.5.1/cytoscape-cola.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cola/3.4.0/cola.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
 (function () {
   "use strict";
   var FACTS = JSON.parse(document.getElementById("facts").textContent);
   var NARRATIVE = JSON.parse(document.getElementById("narrative").textContent);
+  var CODE = JSON.parse(document.getElementById("code").textContent);
 
-  // ---- Indexes -------------------------------------------------------------
-  var nodeById = {};
-  (NARRATIVE.nodes || []).forEach(function (n) { nodeById[n.id] = n; });
+  // ---- Normalize narrative to perspectives (v1 -> single "default") --------
+  var PERSPECTIVES = (NARRATIVE.perspectives && NARRATIVE.perspectives.length)
+    ? NARRATIVE.perspectives
+    : [{ id: "default", name: "Overview", kind: "structural",
+         description: "", tiers: NARRATIVE.tiers || [],
+         nodes: NARRATIVE.nodes || [], relationships: NARRATIVE.relationships || [] }];
+
+  var currentPerspective = 0;
+  var nodeById = {};        // rebuilt per perspective
+  var stack = [];           // breadcrumb of parent node ids; [] === tier-0 view
+  var cy = null;
+
+  function persp() { return PERSPECTIVES[currentPerspective]; }
+  function rebuildIndex() {
+    nodeById = {};
+    (persp().nodes || []).forEach(function (n) { nodeById[n.id] = n; });
+  }
+
   var fileById = {};
   (FACTS.files || []).forEach(function (f) { fileById[f.id] = f; });
   var moduleById = {};
@@ -96,19 +185,23 @@
 
   function relsFor(id) {
     var out = [], inb = [];
-    (NARRATIVE.relationships || []).forEach(function (r) {
+    (persp().relationships || []).forEach(function (r) {
       if (r.from === id) out.push(r);
       if (r.to === id) inb.push(r);
     });
     return { out: out, inb: inb };
   }
-
   function verifiedOnly() {
     var el = document.getElementById("verifiedOnly");
     return el && el.checked;
   }
   function hidden(n) {
     return verifiedOnly() && (n.interpretation === true || n.confidence === "low");
+  }
+  function esc(t) {
+    var d = document.createElement("div");
+    d.textContent = t == null ? "" : String(t);
+    return d.innerHTML;
   }
 
   // ---- Coverage banner -----------------------------------------------------
@@ -128,11 +221,36 @@
     b.appendChild(item("Skipped", (er.skipped || []).join(", ") || "—"));
   })();
 
+  // ---- Perspective switcher ------------------------------------------------
+  function renderSwitcher() {
+    var host = document.getElementById("perspectives");
+    host.innerHTML = "";
+    PERSPECTIVES.forEach(function (p, i) {
+      var b = document.createElement("button");
+      b.className = "ptab" + (i === currentPerspective ? " active" : "");
+      b.innerHTML = esc(p.name) + ' <small>' + esc(p.kind || "") + '</small>';
+      b.addEventListener("click", function () { setPerspective(i); });
+      host.appendChild(b);
+    });
+    document.getElementById("pdesc").textContent = persp().description || "";
+  }
+  function setPerspective(i) {
+    currentPerspective = i;
+    stack = [];
+    rebuildIndex();
+    renderSwitcher();
+    hideHoverCard();
+    document.getElementById("panel").innerHTML = "<em>Select a node to inspect its provenance.</em>";
+    draw();
+  }
+
   // ---- Side panel ----------------------------------------------------------
-  function esc(t) {
-    var d = document.createElement("div");
-    d.textContent = t == null ? "" : String(t);
-    return d.innerHTML;
+  function fileRow(fid) {
+    var f = fileById[fid];
+    var path = f ? f.path : fid;
+    var has = CODE[fid] && (CODE[fid].content || CODE[fid].truncated);
+    var view = has ? ' <span class="chip" data-view="' + esc(fid) + '">view</span>' : "";
+    return '<li class="filerow"><code>' + esc(path) + '</code>' + view + '</li>';
   }
   function renderPanel(id) {
     var n = nodeById[id];
@@ -140,10 +258,7 @@
     if (!n) { p.innerHTML = "<em>Select a node to inspect its provenance.</em>"; return; }
     var rel = relsFor(id);
     var refs = n.factRefs || {};
-    var fileList = (refs.fileIds || []).map(function (fid) {
-      var f = fileById[fid];
-      return "<li><code>" + esc(f ? f.path : fid) + "</code></li>";
-    }).join("");
+    var fileList = (refs.fileIds || []).map(fileRow).join("");
     var modList = (refs.moduleIds || []).map(function (mid) {
       var m = moduleById[mid];
       return "<li><code>" + esc(m ? m.path : mid) + "</code></li>";
@@ -158,7 +273,8 @@
     var html =
       '<h2>' + esc(n.label) + '</h2>' +
       '<div><span class="badge ' + conf + '">' + conf + '</span>' +
-      (n.interpretation ? ' <span class="badge interp">interpretation</span>' : '') + '</div>' +
+      (n.interpretation ? ' <span class="badge interp">interpretation</span>' : '') +
+      ' <span class="chip" data-ask="' + esc(n.id) + '">Ask about this</span></div>' +
       '<div class="section"><h3>Description</h3><div>' + esc(n.description) + '</div></div>' +
       '<div class="section"><h3>Backing modules</h3><ul>' + (modList || "<li><em>none</em></li>") + '</ul></div>' +
       '<div class="section"><h3>Backing files</h3><ul>' + (fileList || "<li><em>none</em></li>") + '</ul></div>' +
@@ -168,24 +284,147 @@
       html += '<div class="section"><h3>Leaf node</h3><div>This node has no children; the files above are the backing implementation.</div></div>';
     }
     p.innerHTML = html;
+    Array.prototype.forEach.call(p.querySelectorAll("[data-view]"), function (el) {
+      el.addEventListener("click", function () { openCodeViewer(el.getAttribute("data-view")); });
+    });
+    Array.prototype.forEach.call(p.querySelectorAll("[data-ask]"), function (el) {
+      el.addEventListener("click", function () { askAbout(el.getAttribute("data-ask")); });
+    });
+  }
+
+  // ---- Ask: copy-prompt bridge ---------------------------------------------
+  function composeAskPrompt(node) {
+    var refs = node.factRefs || {};
+    var files = (refs.fileIds || []).map(function (fid) {
+      var f = fileById[fid]; return (f ? f.path : fid) + " (" + fid + ")";
+    });
+    var mods = (refs.moduleIds || []).map(function (mid) {
+      var m = moduleById[mid]; return (m ? m.path : mid) + " (" + mid + ")";
+    });
+    var rel = relsFor(node.id);
+    var edgeIds = [];
+    rel.out.concat(rel.inb).forEach(function (r) { (r.factEdgeIds || []).forEach(function (e) { edgeIds.push(e); }); });
+    var lines = [
+      "In the explain-project report for repo " + ((FACTS.repo || {}).root || "(this repo)") + ",",
+      "from the \"" + persp().name + "\" perspective, explain the component \"" + node.label + "\".",
+      node.description ? ("Current description: " + node.description) : "",
+      mods.length ? ("Backing modules: " + mods.join(", ")) : "",
+      files.length ? ("Backing files: " + files.join(", ")) : "",
+      edgeIds.length ? ("Related fact edges: " + edgeIds.join(", ")) : "",
+      "Confidence: " + node.confidence + (node.interpretation ? " (interpretation)" : ""),
+      "",
+      "My question: "
+    ];
+    return lines.filter(function (l) { return l !== ""; }).join("\n");
+  }
+  function askAbout(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    copyText(composeAskPrompt(n));
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        showToast("Prompt copied — paste it into Claude Code");
+      }, function () { manualCopy(text); });
+    } else {
+      manualCopy(text);
+    }
+  }
+  function manualCopy(text) {
+    document.getElementById("cmtext").value = text;
+    openModal("copymodal");
+    var ta = document.getElementById("cmtext");
+    ta.focus(); ta.select();
+  }
+  function showToast(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.style.display = "block";
+    setTimeout(function () { t.style.display = "none"; }, 2200);
+  }
+
+  // ---- Code viewer ---------------------------------------------------------
+  function openCodeViewer(fid) {
+    var entry = CODE[fid];
+    var title = document.getElementById("cvtitle");
+    var codeEl = document.getElementById("cvcode");
+    var notice = document.getElementById("cvnotice");
+    var f = fileById[fid];
+    title.textContent = (f ? f.path : fid);
+    if (!entry || (!entry.content && !entry.truncated)) {
+      notice.style.display = "block";
+      notice.textContent = entry && entry.missing ? "File not found on disk."
+        : (entry && entry.dropped ? "Omitted to keep the report within its size budget."
+        : "No inlined content for this file.");
+      codeEl.textContent = "";
+    } else {
+      notice.style.display = entry.truncated ? "block" : "none";
+      if (entry.truncated) notice.textContent = "Truncated to fit the report size cap.";
+      codeEl.textContent = entry.content || "";
+      codeEl.className = "language-" + (entry.lang || "plaintext");
+      if (window.hljs && window.hljs.highlightElement) {
+        try { window.hljs.highlightElement(codeEl); } catch (e) { /* plain text fallback */ }
+      }
+    }
+    openModal("codeviewer");
+  }
+
+  // ---- Modal helpers -------------------------------------------------------
+  function openModal(id) { document.getElementById(id).classList.add("open"); }
+  function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+  document.getElementById("cvclose").addEventListener("click", function () { closeModal("codeviewer"); });
+  document.getElementById("cmclose").addEventListener("click", function () { closeModal("copymodal"); });
+  Array.prototype.forEach.call(document.querySelectorAll(".modal"), function (m) {
+    m.addEventListener("click", function (e) { if (e.target === m) m.classList.remove("open"); });
+  });
+
+  // ---- Hover card ----------------------------------------------------------
+  var hoverHideTimer = null;
+  function hideHoverCard() {
+    var hc = document.getElementById("hovercard");
+    hc.style.display = "none";
+  }
+  function showHoverCard(node, rendered) {
+    var hc = document.getElementById("hovercard");
+    var refs = node.factRefs || {};
+    var nFiles = (refs.fileIds || []).length, nMods = (refs.moduleIds || []).length;
+    var rel = relsFor(node.id);
+    hc.innerHTML =
+      '<h4>' + esc(node.label) + ' <span class="badge ' + esc(node.confidence) + '">' + esc(node.confidence) + '</span></h4>' +
+      '<div class="meta">' + nMods + ' module(s), ' + nFiles + ' file(s), ' +
+        (rel.out.length + rel.inb.length) + ' relationship(s)</div>' +
+      '<div class="actions">' +
+        '<span class="chip" id="hc-ask">Ask</span>' +
+        '<span class="chip" id="hc-view">View code</span>' +
+      '</div>';
+    var main = document.getElementById("main");
+    var box = main.getBoundingClientRect();
+    var x = rendered.x + 24, y = rendered.y - 10;
+    hc.style.left = Math.max(4, Math.min(x, box.width - 270)) + "px";
+    hc.style.top = Math.max(4, Math.min(y, box.height - 90)) + "px";
+    hc.style.display = "block";
+    document.getElementById("hc-ask").addEventListener("click", function () { askAbout(node.id); });
+    document.getElementById("hc-view").addEventListener("click", function () {
+      var fid = (refs.fileIds || [])[0];
+      if (fid) openCodeViewer(fid); else showToast("No backing file to view");
+    });
+    hc.addEventListener("mouseenter", function () { if (hoverHideTimer) clearTimeout(hoverHideTimer); });
+    hc.addEventListener("mouseleave", hideHoverCard);
   }
 
   // ---- Graph + drill-down --------------------------------------------------
-  var cy = null;
-  var stack = [];  // breadcrumb of parent node ids; [] === tier-0 view
-
   function currentChildren() {
     if (stack.length === 0) {
-      return (NARRATIVE.nodes || []).filter(function (n) { return n.tier === 0; });
+      return (persp().nodes || []).filter(function (n) { return n.tier === 0; });
     }
     var parent = nodeById[stack[stack.length - 1]];
-    return (parent.children || []).map(function (cid) { return nodeById[cid]; })
-                                  .filter(Boolean);
+    return ((parent && parent.children) || []).map(function (cid) { return nodeById[cid]; })
+                                              .filter(Boolean);
   }
 
   function renderBreadcrumb() {
     var bc = document.getElementById("breadcrumb");
-    var parts = ['<a data-depth="0">System</a>'];
+    var parts = ['<a data-depth="0">' + esc(persp().name) + '</a>'];
     stack.forEach(function (id, i) {
       parts.push(' / <a data-depth="' + (i + 1) + '">' + esc((nodeById[id] || {}).label || id) + '</a>');
     });
@@ -199,8 +438,19 @@
     document.getElementById("back").disabled = stack.length === 0;
   }
 
+  function runLayout() {
+    var name = "cose";
+    if (cy.layout && typeof cytoscape !== "undefined" && cytoscape.prototype.cola) name = "cola";
+    var opts = name === "cola"
+      ? { name: "cola", animate: true, infinite: true, fit: false, nodeSpacing: 24, edgeLength: 140 }
+      : { name: "cose", animate: true, padding: 30 };
+    try { cy.layout(opts).run(); }
+    catch (e) { cy.layout({ name: "cose", animate: false, padding: 30 }).run(); }
+  }
+
   function draw() {
     renderBreadcrumb();
+    hideHoverCard();
     if (!cy) return;
     var nodes = currentChildren().filter(function (n) { return !hidden(n); });
     var ids = {};
@@ -210,7 +460,7 @@
                        interp: n.interpretation ? "yes" : "no",
                        drill: (n.children && n.children.length) ? "yes" : "no" } };
     });
-    (NARRATIVE.relationships || []).forEach(function (r) {
+    (persp().relationships || []).forEach(function (r) {
       if (ids[r.from] && ids[r.to]) {
         els.push({ data: { id: "rel_" + r.from + "_" + r.to, source: r.from,
                            target: r.to, label: r.label } });
@@ -218,7 +468,7 @@
     });
     cy.elements().remove();
     cy.add(els);
-    cy.layout({ name: "cose", animate: false, padding: 30 }).run();
+    runLayout();
   }
 
   function initGraph() {
@@ -230,18 +480,25 @@
             "text-valign": "center", "text-halign": "center", "text-wrap": "wrap",
             "text-max-width": "90px", "width": "70px", "height": "70px",
             "border-width": 2, "border-color": "#0b0e14",
-            "background-color": "#444c5a" } },
+            "background-color": "#444c5a",
+            "transition-property": "width height border-color border-width background-color opacity",
+            "transition-duration": "150ms" } },
         { selector: 'node[conf="high"]', style: { "background-color": "#3fb950" } },
         { selector: 'node[conf="medium"]', style: { "background-color": "#d29922" } },
         { selector: 'node[conf="low"]', style: { "background-color": "#f85149" } },
         { selector: 'node[drill="yes"]', style: { "border-color": "#58a6ff", "border-width": 4 } },
         { selector: 'node[interp="yes"]', style: { "border-style": "dashed" } },
+        { selector: 'node.hover', style: { "width": "84px", "height": "84px",
+            "border-color": "#58a6ff", "border-width": 5 } },
+        { selector: 'node.dim', style: { "opacity": 0.3 } },
+        { selector: 'edge.dim', style: { "opacity": 0.12 } },
         { selector: "edge", style: {
             "label": "data(label)", "font-size": "9px", "color": "#9aa3b2",
             "width": 1.5, "line-color": "#586069", "target-arrow-color": "#586069",
             "target-arrow-shape": "triangle", "curve-style": "bezier" } },
       ],
     });
+
     cy.on("tap", "node", function (evt) {
       var n = nodeById[evt.target.id()];
       renderPanel(evt.target.id());
@@ -250,6 +507,24 @@
         draw();
       }
     });
+
+    cy.on("mouseover", "node", function (evt) {
+      if (hoverHideTimer) clearTimeout(hoverHideTimer);
+      var ele = evt.target;
+      var n = nodeById[ele.id()];
+      if (!n) return;
+      ele.addClass("hover");
+      var nbr = ele.closedNeighborhood();
+      cy.elements().not(nbr).addClass("dim");
+      showHoverCard(n, ele.renderedPosition());
+    });
+    cy.on("mouseout", "node", function (evt) {
+      evt.target.removeClass("hover");
+      cy.elements().removeClass("dim");
+      hoverHideTimer = setTimeout(hideHoverCard, 180);
+    });
+    cy.on("pan zoom drag", hideHoverCard);
+
     draw();
   }
 
@@ -258,6 +533,9 @@
   });
   document.getElementById("verifiedOnly").addEventListener("change", draw);
 
+  // ---- Boot ----------------------------------------------------------------
+  rebuildIndex();
+  renderSwitcher();
   if (typeof cytoscape === "undefined") {
     document.getElementById("offline").style.display = "block";
     document.getElementById("cy").style.display = "none";
