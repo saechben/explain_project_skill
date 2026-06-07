@@ -1,0 +1,16 @@
+[project]
+name = "src-app"
+version = "0.1.0"
+dependencies = [
+    "requests>=2.0",
+]
+
+[project.scripts]
+src-app = "cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"app" = "src/app", "cli" = "cli"}
