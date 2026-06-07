@@ -80,3 +80,60 @@ class TestTemplateFeatures:
         code = {"f0001": {"path": "a.py", "lang": "python", "content": "print('x')\n", "truncated": False}}
         html = _html(code=code)
         assert "print('x')" in html
+
+
+class TestBusinessBriefFeatures:
+    def test_briefview_and_viewtabs_present(self):
+        html = _html()
+        assert 'id="briefview"' in html
+        assert 'id="viewtabs"' in html
+
+    def test_view_toggle_buttons_present(self):
+        html = _html()
+        assert 'id="vt-brief"' in html
+        assert 'id="vt-map"' in html
+        assert "showMap" in html
+        assert "showBrief" in html
+
+    def test_mapview_wrapper_present(self):
+        html = _html()
+        assert 'id="mapview"' in html
+
+    def test_render_brief_function_present(self):
+        html = _html()
+        assert "renderBrief" in html
+
+    def test_capability_cards_classes_and_link_present(self):
+        html = _html()
+        assert "cap-card" in html
+        assert "cap-grid" in html
+        # capability cards link into the graph via setPerspective
+        assert "setPerspective" in html
+
+    def test_stat_tiles_classes_and_facts_source(self):
+        html = _html()
+        assert "stat-grid" in html
+        assert "stat" in html
+        # stats are computed purely from facts
+        assert "totalFiles" in html
+
+    def test_tech_chips_group_class_present(self):
+        html = _html()
+        assert "tech-group" in html
+
+    def test_brief_respects_verified_only(self):
+        html = _html()
+        # the brief render path consults the verified-only predicate
+        assert "hidden(" in html
+
+    def test_vtab_css_class_present(self):
+        html = _html()
+        assert ".vtab" in html
+
+    def test_lazy_init_flag_present(self):
+        html = _html()
+        assert "cyInited" in html
+
+    def test_ask_about_brief_present(self):
+        html = _html()
+        assert "askAboutBrief" in html

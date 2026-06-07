@@ -32,6 +32,124 @@ def _perspectives(narrative: dict) -> list[dict]:
     }]
 
 
+def _verify_business_brief(
+    brief: dict,
+    *,
+    file_ids: set,
+    module_ids: set,
+    file_path_by_id: dict,
+    dep_names: set,
+    node_ids_by_pid: dict,
+    valid_pids: set,
+    repo_root: pathlib.Path | None,
+) -> tuple[list[dict], list[dict]]:
+    """Validate an optional businessBrief object under node-grade discipline.
+
+    Returns (errors, warnings). Every message is prefixed ``[businessBrief]``.
+    The empty-grounding predicate mirrors the node check, keyed on ``text``.
+    """
+    errors: list[dict] = []
+    warnings: list[dict] = []
+    P = "[businessBrief]"
+
+    def check_claim(claim: dict, where: str) -> None:
+        refs = claim.get("factRefs", {}) or {}
+        file_refs = refs.get("fileIds", []) or []
+        module_refs = refs.get("moduleIds", []) or []
+
+        # empty-grounding (same predicate as nodes, keyed on text)
+        has_refs = bool(file_refs) or bool(module_refs)
+        allowed_interpretation = (
+            claim.get("interpretation") is True
+            and claim.get("confidence") == "low"
+            and bool(claim.get("text"))
+        )
+        if not has_refs and not allowed_interpretation:
+            errors.append({
+                "check": "empty-grounding",
+                "message": f"{P} {where} has no factRefs and is not a low-confidence interpretation",
+            })
+
+        # referential-integrity
+        for fid in file_refs:
+            if fid not in file_ids:
+                errors.append({
+                    "check": "referential-integrity",
+                    "message": f"{P} {where} references unknown fileId {fid!r}",
+                })
+        for mid in module_refs:
+            if mid not in module_ids:
+                errors.append({
+                    "check": "referential-integrity",
+                    "message": f"{P} {where} references unknown moduleId {mid!r}",
+                })
+
+        # file-existence (only when repo_root given)
+        if repo_root is not None:
+            for fid in file_refs:
+                path = file_path_by_id.get(fid)
+                if path is None:
+                    continue  # caught by referential integrity
+                if not (repo_root / path).exists():
+                    errors.append({
+                        "check": "file-existence",
+                        "message": f"{P} {where} fileId {fid!r} path {path!r} does not exist under repo root",
+                    })
+
+    # headline (grounding-exempt; WARN only)
+    if not brief.get("headline"):
+        warnings.append({
+            "check": "headline",
+            "message": f"{P} headline is empty or missing",
+        })
+
+    # required claims
+    if isinstance(brief.get("problem"), dict):
+        check_claim(brief["problem"], "problem")
+    if isinstance(brief.get("solution"), dict):
+        check_claim(brief["solution"], "solution")
+    # optional claim
+    if isinstance(brief.get("audience"), dict):
+        check_claim(brief["audience"], "audience")
+
+    # capabilities
+    for i, cap in enumerate(brief.get("capabilities", []) or []):
+        label = cap.get("label") or i
+        check_claim(cap, f"capability {label!r}")
+        pref = cap.get("perspectiveRef")
+        nref = cap.get("nodeRef")
+        if pref is not None and pref not in valid_pids:
+            errors.append({
+                "check": "capability-ref",
+                "message": f"{P} capability {label!r} perspectiveRef {pref!r} is not a perspective id",
+            })
+        if nref is not None:
+            if pref is None:
+                errors.append({
+                    "check": "capability-ref",
+                    "message": f"{P} capability {label!r} has nodeRef {nref!r} but no perspectiveRef",
+                })
+            elif nref not in node_ids_by_pid.get(pref, set()):
+                errors.append({
+                    "check": "capability-ref",
+                    "message": (
+                        f"{P} capability {label!r} nodeRef {nref!r} is not a node "
+                        f"in perspective {pref!r}"
+                    ),
+                })
+
+    # techStack
+    for ts in brief.get("techStack", []) or []:
+        ref = ts.get("factRef")
+        if ref not in dep_names:
+            errors.append({
+                "check": "techstack-ref",
+                "message": f"{P} techStack factRef {ref!r} is not an externalDependencies name",
+            })
+
+    return errors, warnings
+
+
 def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) -> dict:
     """Run all anti-hallucination checks and return a machine-readable report.
 
@@ -74,12 +192,17 @@ def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) 
     total_files = len(file_ids)
     total_nodes = 0
 
+    node_ids_by_pid: dict = {}
+    valid_pids: set = set()
+
     for p in perspectives:
         pid = p.get("id")
         nodes = p.get("nodes", []) or []
         relationships = p.get("relationships", []) or []
         total_nodes += len(nodes)
         node_ids = {n.get("id") for n in nodes}
+        node_ids_by_pid[pid] = set(node_ids)
+        valid_pids.add(pid)
 
         # --- Structural check: unique node ids within the perspective ---
         seen_nids: set = set()
@@ -181,6 +304,23 @@ def verify(facts: dict, narrative: dict, repo_root: pathlib.Path | None = None) 
             "filesCoveredByNode": len(covered_p),
             "fileCoveragePct": round(100.0 * len(covered_p) / total_files, 2) if total_files else 0.0,
         })
+
+    # --- Business brief checks (optional object) ---
+    brief = narrative.get("businessBrief")
+    if brief is not None:
+        dep_names = {d.get("name") for d in facts.get("externalDependencies", []) or []}
+        brief_errors, brief_warnings = _verify_business_brief(
+            brief,
+            file_ids=file_ids,
+            module_ids=module_ids,
+            file_path_by_id=file_path_by_id,
+            dep_names=dep_names,
+            node_ids_by_pid=node_ids_by_pid,
+            valid_pids=valid_pids,
+            repo_root=repo_root,
+        )
+        errors.extend(brief_errors)
+        warnings.extend(brief_warnings)
 
     # --- Check 4: commit match (warning only) ---
     based_on = narrative.get("basedOnFactsCommit")

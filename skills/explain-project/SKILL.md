@@ -77,6 +77,7 @@ entrypoints, external dependencies, git signals, and an `extractionReport`.
    ```jsonc
    { "schemaVersion": "2.0", "basedOnFactsCommit": "<facts.repo.headCommit>",
      "perspectives": [ { "id","name","kind","description","tiers","nodes","relationships" } ],
+     "businessBrief": { /* optional — see 5b */ },
      "openQuestions": [] }
    ```
    - Every node's `factRefs` must reference ≥1 real `moduleIds`/`fileIds` from
@@ -86,6 +87,40 @@ entrypoints, external dependencies, git signals, and an `extractionReport`.
      be node ids in the same perspective.
    - `basedOnFactsCommit` must equal `facts.repo.headCommit`.
    - Put genuine unknowns in `openQuestions` rather than guessing.
+
+5b. **Write the business brief (optional, grounded).** Add a top-level `businessBrief`
+   object — a plain-language brief of *what the project is and what problem it solves*, for
+   non-architect readers. The report leads with it as the landing view.
+   - **Purpose:** one screen a PM or new hire can read before touching the map. Keep it
+     concrete; no marketing fluff.
+   - **Source signals:** project name/description are NOT in `facts.json`. Infer `headline`
+     from `facts.repo.root` basename + the dominant entrypoint `kind` + the top external
+     dependencies. Ground `problem`/`solution`/`audience` claims on real `moduleIds`/`fileIds`
+     — e.g. the web/CLI entrypoint file, the core module.
+   - **Grounding rules (SAME discipline as nodes, enforced by `verify.py`):**
+     - Each of `problem`/`solution`/`audience` and every `capabilities[]` item needs ≥1
+       `factRefs` id — UNLESS `interpretation: true` + `confidence: "low"` + written `text`.
+     - `techStack[].factRef` must equal a real `externalDependencies[].name`. Infer `role`
+       ("web framework", "test runner") freely, but only `name`/`factRef` is grounded.
+     - `capabilities[]` should set `perspectiveRef` + `nodeRef` pointing at a real node in
+       the **functional** lens so the card can jump into the map.
+     - `headline` is the ONE grounding-exempt line — keep it factual and modest; push
+       genuine uncertainty into `openQuestions`, not the headline.
+   - Keep the **Structural** lens as the grounded spine. Aim for at least one high/medium
+     grounded `problem` AND `solution` so the **Verified-only** toggle doesn't blank the brief.
+   - Shape:
+     ```jsonc
+     "businessBrief": {
+       "headline": "…",                                  // grounding-exempt, ≥1 char
+       "problem":  { "text","factRefs","confidence","interpretation" },   // required
+       "solution": { "text","factRefs","confidence","interpretation" },   // required
+       "audience": { … },                                // optional briefClaim
+       "howItWorks": "…",                                // optional prose
+       "capabilities": [ { "label","text","factRefs","confidence","interpretation",
+                           "perspectiveRef","nodeRef" } ],
+       "techStack": [ { "name","role","factRef" } ]      // factRef == an externalDependencies name
+     }
+     ```
 
 ### Phase 3 — Render
 
@@ -119,6 +154,10 @@ Once the gate passes, present `report.html` and summarize: the tiers you chose a
 overall confidence/coverage (from `verify.report.json` and the coverage banner), the
 external dependencies, and any `openQuestions`. Point out that the **verified-only
 toggle** shows the deterministically-grounded structure with all interpretation hidden.
+
+The report now leads with the **Brief** view (the business brief) and offers a **Brief/Map
+toggle** — open on the Brief for a plain-language summary, switch to the Map to drill
+through the lenses.
 
 ## Anti-patterns (stop and fix)
 

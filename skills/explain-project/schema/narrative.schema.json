@@ -30,6 +30,7 @@
         }
       }
     },
+    "businessBrief": { "$ref": "#/$defs/businessBrief" },
     "openQuestions": { "type": "array", "items": { "type": "string" } }
   },
   "oneOf": [
@@ -37,6 +38,68 @@
     { "required": ["tiers", "nodes", "relationships"] }
   ],
   "$defs": {
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "briefFactRefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "moduleIds": { "type": "array", "items": { "type": "string" } },
+        "fileIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "briefClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "factRefs", "confidence", "interpretation"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "factRefs": { "$ref": "#/$defs/briefFactRefs" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "interpretation": { "type": "boolean" }
+      }
+    },
+    "businessBrief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "problem", "solution"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 1 },
+        "problem": { "$ref": "#/$defs/briefClaim" },
+        "solution": { "$ref": "#/$defs/briefClaim" },
+        "audience": { "$ref": "#/$defs/briefClaim" },
+        "howItWorks": { "type": "string" },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "text", "factRefs", "confidence", "interpretation"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "text": { "type": "string", "minLength": 1 },
+              "factRefs": { "$ref": "#/$defs/briefFactRefs" },
+              "confidence": { "$ref": "#/$defs/confidence" },
+              "interpretation": { "type": "boolean" },
+              "perspectiveRef": { "type": "string" },
+              "nodeRef": { "type": "string" }
+            }
+          }
+        },
+        "techStack": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "role", "factRef"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "role": { "type": "string" },
+              "factRef": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "tiers": {
       "type": "array",
       "minItems": 1,
