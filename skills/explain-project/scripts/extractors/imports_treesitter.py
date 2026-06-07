@@ -17,6 +17,7 @@ from contract import FileIndex
 from extractors.imports_heuristic import (
     JS_EXT,
     PY_EXT,
+    build_package_roots,
     make_edge,
     resolve_js,
     resolve_python,
@@ -56,7 +57,7 @@ def _raw_line(src_lines: list[str], line_no: int) -> str:
 
 # --- python ------------------------------------------------------------------
 def _walk_python_imports(root, src: bytes, src_lines, importing_path, from_id,
-                         index) -> list[dict]:
+                         index, package_roots=None) -> list[dict]:
     edges: list[dict] = []
 
     def visit(node):
@@ -68,7 +69,7 @@ def _walk_python_imports(root, src: bytes, src_lines, importing_path, from_id,
                 ck = child.kind()
                 if ck == "dotted_name":
                     mod = _node_text(child, src)
-                    target = resolve_python(mod, 0, importing_path, index)
+                    target = resolve_python(mod, 0, importing_path, index, package_roots)
                     edges.append(make_edge(importing_path, line, raw, target,
                                            from_id, "treesitter"))
                 elif ck == "aliased_import":
@@ -76,7 +77,7 @@ def _walk_python_imports(root, src: bytes, src_lines, importing_path, from_id,
                                if c.kind() == "dotted_name"), None)
                     if dn is not None:
                         mod = _node_text(dn, src)
-                        target = resolve_python(mod, 0, importing_path, index)
+                        target = resolve_python(mod, 0, importing_path, index, package_roots)
                         edges.append(make_edge(importing_path, line, raw, target,
                                                from_id, "treesitter"))
         elif kind == "import_from_statement":
@@ -98,7 +99,7 @@ def _walk_python_imports(root, src: bytes, src_lines, importing_path, from_id,
                     # absolute `from pkg.util import x`; first dotted_name is module
                     mod = _node_text(child, src)
                     break
-            target = resolve_python(mod, level, importing_path, index)
+            target = resolve_python(mod, level, importing_path, index, package_roots)
             edges.append(make_edge(importing_path, line, raw, target,
                                    from_id, "treesitter"))
             return  # don't descend into the import body
@@ -169,6 +170,7 @@ def collect(repo_root, file_index: FileIndex) -> list[dict]:
     from tree_sitter_language_pack import get_parser
 
     root = Path(repo_root)
+    package_roots = build_package_roots(file_index)
     edges: list[dict] = []
     parsers: dict[str, object] = {}
 
@@ -199,7 +201,7 @@ def collect(repo_root, file_index: FileIndex) -> list[dict]:
 
         if ext in PY_EXT:
             edges.extend(_walk_python_imports(rootnode, src, src_lines, rec.path,
-                                              rec.id, file_index))
+                                              rec.id, file_index, package_roots))
         elif ext in JS_EXT:
             edges.extend(_walk_js_imports(rootnode, src, src_lines, rec.path,
                                           rec.id, file_index))

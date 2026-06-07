@@ -23,13 +23,52 @@ _JS_RESOLVE_EXT = [".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"]
 
 
 # --- resolution helpers (shared with the tree-sitter extractor) --------------
+def build_package_roots(index: FileIndex) -> dict[str, list[str]]:
+    """Map each top-level Python package name to the source-dir prefix(es) it lives under.
+
+    A *top-level package* is a directory containing ``__init__.py`` whose parent
+    directory does NOT itself contain ``__init__.py``. Its source-dir prefix is that
+    parent (the repo root is ``""``). This lets the resolver follow absolute
+    cross-boundary imports under a ``src/`` layout (e.g. ``app`` -> ``src``), where
+    the import path (``app.config``) differs from the on-disk path
+    (``src/app/config.py``).
+
+    Returns ``{pkg_name: [sorted source-dir prefixes]}``. Module granularity only;
+    no symbol-level resolution and no PEP-420 namespace packages (which have no
+    ``__init__.py`` to detect).
+    """
+    init_dirs = {
+        str(Path(p).parent.as_posix())
+        for p in index.paths()
+        if Path(p).name == "__init__.py"
+    }
+
+    def has_init(dir_posix: str) -> bool:
+        # "" denotes the repo root, which never holds a package __init__.py.
+        return dir_posix in init_dirs
+
+    roots: dict[str, set[str]] = {}
+    for d in init_dirs:
+        parent = str(Path(d).parent.as_posix())
+        parent = "" if parent == "." else parent
+        if has_init(parent):
+            continue  # nested package; not a top-level one
+        name = Path(d).name
+        roots.setdefault(name, set()).add(parent)
+    return {name: sorted(prefixes) for name, prefixes in roots.items()}
+
+
 def resolve_python(module: str, level: int, importing_path: str,
-                   index: FileIndex) -> Optional[str]:
+                   index: FileIndex,
+                   package_roots: Optional[dict[str, list[str]]] = None) -> Optional[str]:
     """Resolve a Python import to an internal file id, or None.
 
     module: dotted module text (e.g. "pkg.util"); may be "" for `from . import x`.
     level:  number of leading dots for relative imports (0 = absolute).
     importing_path: repo-relative posix path of the file doing the import.
+    package_roots: optional ``{pkg: [source-dir prefixes]}`` from
+        :func:`build_package_roots`; enables src-layout resolution for absolute
+        imports. When omitted, behavior is identical to the pre-existing resolver.
     """
     parts = [p for p in module.split(".") if p] if module else []
 
@@ -49,11 +88,26 @@ def resolve_python(module: str, level: int, importing_path: str,
     if not base_parts:
         return None
 
-    candidates = [
-        "/".join(base_parts) + ".py",
-        "/".join(base_parts) + "/__init__.py",
-    ]
-    for cand in candidates:
+    fid = _lookup_module(base_parts, index)
+    if fid:
+        return fid
+
+    # src-layout retry: absolute import whose first segment is a known package
+    # rooted under a source dir (e.g. app -> src/app). Module granularity.
+    if level == 0 and package_roots and parts:
+        for prefix in package_roots.get(parts[0], []):
+            if not prefix:
+                continue  # root-level prefix already tried above
+            fid = _lookup_module(prefix.split("/") + base_parts, index)
+            if fid:
+                return fid
+    return None
+
+
+def _lookup_module(base_parts: list[str], index: FileIndex) -> Optional[str]:
+    """Try the ``<parts>.py`` then ``<parts>/__init__.py`` candidates for a module path."""
+    joined = "/".join(base_parts)
+    for cand in (joined + ".py", joined + "/__init__.py"):
         fid = index.id_for_path(cand)
         if fid:
             return fid
@@ -120,14 +174,15 @@ _PY_IMPORT = re.compile(r"^\s*import\s+(?P<mods>[\w.]+(?:\s*,\s*[\w.]+)*)")
 
 
 def _scan_python(text: str, importing_path: str, from_id: str, index: FileIndex,
-                 extractor: str) -> list[dict]:
+                 extractor: str,
+                 package_roots: Optional[dict[str, list[str]]] = None) -> list[dict]:
     edges: list[dict] = []
     for i, line in enumerate(text.splitlines(), start=1):
         m = _PY_FROM.match(line)
         if m:
             dots = m.group("dots")
             mod = m.group("mod")
-            target = resolve_python(mod, len(dots), importing_path, index)
+            target = resolve_python(mod, len(dots), importing_path, index, package_roots)
             edges.append(make_edge(importing_path, i, line.rstrip("\n"),
                                    target, from_id, extractor))
             continue
@@ -137,7 +192,7 @@ def _scan_python(text: str, importing_path: str, from_id: str, index: FileIndex,
                 mod = mod.strip()
                 if not mod:
                     continue
-                target = resolve_python(mod, 0, importing_path, index)
+                target = resolve_python(mod, 0, importing_path, index, package_roots)
                 edges.append(make_edge(importing_path, i, line.rstrip("\n"),
                                        target, from_id, extractor))
     return edges
@@ -176,6 +231,7 @@ def _scan_js(text: str, importing_path: str, from_id: str, index: FileIndex,
 def collect(repo_root, file_index: FileIndex) -> list[dict]:
     """Scan every python/js/ts file in the index for imports via line heuristics."""
     root = Path(repo_root)
+    package_roots = build_package_roots(file_index)
     edges: list[dict] = []
     for rec in file_index.records:
         ext = Path(rec.path).suffix.lower()
@@ -187,7 +243,8 @@ def collect(repo_root, file_index: FileIndex) -> list[dict]:
         except (OSError, UnicodeDecodeError):
             continue
         if ext in PY_EXT:
-            edges.extend(_scan_python(text, rec.path, rec.id, file_index, "heuristic"))
+            edges.extend(_scan_python(text, rec.path, rec.id, file_index, "heuristic",
+                                      package_roots))
         else:
             edges.extend(_scan_js(text, rec.path, rec.id, file_index, "heuristic"))
     edges.sort(key=lambda e: (e["evidence"]["file"], e["evidence"]["line"]))
