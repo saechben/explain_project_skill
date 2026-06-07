@@ -126,6 +126,72 @@ class TestPipeline:
         a_fid = facts["files"][0]["id"]
         assert recovered[a_fid]["content"] == (py_app / facts["files"][0]["path"]).read_text()
 
+    def _brief_narrative(self, facts):
+        """A v2 two-lens narrative carrying a grounded businessBrief, all over py_app facts."""
+        file_ids = [f["id"] for f in facts["files"]]
+        module_ids = [m["id"] for m in facts["modules"]]
+        dep_names = [d["name"] for d in facts["externalDependencies"]]
+        return {
+            "schemaVersion": "2.0",
+            "basedOnFactsCommit": facts["repo"]["headCommit"],
+            "perspectives": [
+                {"id": "structural", "name": "Structural", "kind": "structural",
+                 "description": "modules + imports",
+                 "tiers": [{"level": 0, "name": "System"}],
+                 "nodes": [{"id": "s1", "tier": 0, "label": "Package", "description": "All code.",
+                            "factRefs": {"moduleIds": module_ids[:1], "fileIds": file_ids[:2]},
+                            "children": [], "confidence": "high", "interpretation": False}],
+                 "relationships": []},
+                {"id": "functional", "name": "Functional", "kind": "functional",
+                 "description": "capabilities",
+                 "tiers": [{"level": 0, "name": "Capabilities"}],
+                 "nodes": [{"id": "f1", "tier": 0, "label": "Core", "description": "Core capability.",
+                            "factRefs": {"moduleIds": [], "fileIds": file_ids[:1]},
+                            "children": [], "confidence": "medium", "interpretation": True}],
+                 "relationships": []},
+            ],
+            "businessBrief": {
+                "headline": "py-app — a small Python package",
+                "problem": {"text": "Users need the behavior this package provides.",
+                            "factRefs": {"fileIds": file_ids[:1]},
+                            "confidence": "medium", "interpretation": True},
+                "solution": {"text": "A focused module exposing the core entry point.",
+                             "factRefs": {"moduleIds": module_ids[:1]},
+                             "confidence": "high", "interpretation": False},
+                "capabilities": [
+                    {"label": "Core", "text": "The primary capability.",
+                     "factRefs": {"fileIds": file_ids[:1]},
+                     "confidence": "medium", "interpretation": True,
+                     "perspectiveRef": "functional", "nodeRef": "f1"}
+                ],
+                "techStack": ([{"name": dep_names[0], "role": "library", "factRef": dep_names[0]}]
+                              if dep_names else []),
+            },
+            "openQuestions": [],
+        }
+
+    def test_business_brief_passes_gate_and_renders(self, py_app):
+        facts = extract(py_app)
+        narrative = self._brief_narrative(facts)
+        report = verify(facts, narrative, repo_root=py_app)
+        assert report["status"] == "PASS", report["errors"]
+        html = build_report(facts, narrative, TEMPLATE)
+        # the brief view + its headline round-trip into the report
+        assert 'id="briefview"' in html
+        assert "py-app — a small Python package" in html
+
+    def test_ungrounded_brief_claim_fails_gate(self, py_app):
+        facts = extract(py_app)
+        narrative = self._brief_narrative(facts)
+        # Strip grounding AND interpretation flag -> must fail empty-grounding.
+        narrative["businessBrief"]["problem"] = {
+            "text": "An unbacked confident claim.",
+            "factRefs": {}, "confidence": "high", "interpretation": False,
+        }
+        report = verify(facts, narrative, repo_root=py_app)
+        assert report["status"] == "FAIL"
+        assert any("businessBrief" in e["message"] for e in report["errors"])
+
     def test_pipeline_round_trips_inlined_json(self, py_app):
         facts = extract(py_app)
         narrative = _grounded_narrative(facts)

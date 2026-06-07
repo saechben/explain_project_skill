@@ -93,6 +93,45 @@ def make_narrative() -> dict:
     }
 
 
+def make_business_brief() -> dict:
+    return {
+        "headline": "Ships grounded repo explainers",
+        "problem": {
+            "text": "Onboarding to a new repo is slow.",
+            "factRefs": {"moduleIds": ["m001"], "fileIds": ["f0001"]},
+            "confidence": "high",
+            "interpretation": False,
+        },
+        "solution": {
+            "text": "Generates an interactive grounded report.",
+            "factRefs": {"moduleIds": [], "fileIds": ["f0002"]},
+            "confidence": "medium",
+            "interpretation": True,
+        },
+        "audience": {
+            "text": "Engineers new to a codebase.",
+            "factRefs": {"moduleIds": [], "fileIds": []},
+            "confidence": "low",
+            "interpretation": True,
+        },
+        "howItWorks": "Facts are extracted then narrated.",
+        "capabilities": [
+            {
+                "label": "Interactive map",
+                "text": "Explore the repo as a graph.",
+                "factRefs": {"moduleIds": ["m001"], "fileIds": []},
+                "confidence": "high",
+                "interpretation": False,
+                "perspectiveRef": "structural",
+                "nodeRef": "n0",
+            }
+        ],
+        "techStack": [
+            {"name": "python", "role": "language", "factRef": "python"},
+        ],
+    }
+
+
 def read_template() -> str:
     return TEMPLATE.read_text(encoding="utf-8")
 
@@ -136,6 +175,21 @@ class TestBuildReport:
         facts_json = _unescape_and_load(_extract_json(html, "facts"))
         assert facts_json["extractionReport"]["importEdgesResolved"] == 1
         assert "node_modules" in facts_json["extractionReport"]["skipped"]
+
+    def test_business_brief_round_trips(self):
+        narrative = make_narrative()
+        narrative["businessBrief"] = make_business_brief()
+        html = build_report(make_facts(), narrative, read_template())
+        # The headline string survives inlining inside the narrative blob.
+        assert "Ships grounded repo explainers" in html
+        narrative_json = _unescape_and_load(_extract_json(html, "narrative"))
+        assert narrative_json["businessBrief"] == make_business_brief()
+
+    def test_business_brief_capability_label_inlined(self):
+        narrative = make_narrative()
+        narrative["businessBrief"] = make_business_brief()
+        html = build_report(make_facts(), narrative, read_template())
+        assert "Interactive map" in html
 
 
 class TestMain:

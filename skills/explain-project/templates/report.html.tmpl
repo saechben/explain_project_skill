@@ -26,6 +26,43 @@
   .ptab.active { color: #0b0e14; background: var(--accent); border-color: var(--accent);
                  font-weight: 600; }
   .ptab small { opacity: .7; font-weight: 400; }
+  #viewtabs { padding: 10px 16px 0; display: flex; gap: 8px; }
+  .vtab { background: #1b2030; color: var(--muted); border: 1px solid var(--line);
+          border-radius: 999px; padding: 5px 16px; cursor: pointer; font-size: 13px;
+          transition: all .15s ease; }
+  .vtab:hover { color: var(--fg); border-color: var(--accent); }
+  .vtab.active { color: #0b0e14; background: var(--accent); border-color: var(--accent);
+                 font-weight: 600; }
+  /* Business Brief view */
+  #briefview { max-width: 900px; margin: 0 auto; padding: 24px 20px 48px; }
+  .brief-headline { font-size: 28px; line-height: 1.25; margin: 0 0 20px; }
+  .brief-section { margin: 22px 0; }
+  .brief-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+                      color: var(--muted); margin: 0 0 6px; }
+  .brief-section p { margin: 0 0 8px; }
+  .brief-prov { margin: 6px 0 0; padding-left: 16px; }
+  .brief-muted { color: var(--muted); font-style: italic; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+               gap: 10px; margin: 18px 0 26px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 12px 14px; }
+  .stat .num { font-size: 22px; font-weight: 700; color: var(--fg); }
+  .stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase;
+               letter-spacing: .04em; margin-top: 2px; }
+  .cap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+              gap: 12px; margin-top: 8px; }
+  .cap-card { background: var(--panel); border: 1px solid var(--line);
+              border-left: 3px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .cap-card.high { border-left-color: var(--high); }
+  .cap-card.medium { border-left-color: var(--medium); }
+  .cap-card.low { border-left-color: var(--low); }
+  .cap-card.clickable { cursor: pointer; }
+  .cap-card.clickable:hover { border-color: var(--accent); }
+  .cap-card h4 { margin: 0 0 6px; font-size: 14px; }
+  .cap-card p { margin: 0 0 8px; font-size: 13px; }
+  .tech-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+  .tech-group .role { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                      letter-spacing: .04em; margin-right: 4px; min-width: 80px; }
   #pdesc { padding: 4px 16px 0; font-size: 12px; color: var(--muted); }
   #toolbar { padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex;
              align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -96,6 +133,10 @@
 <body>
 <header><h1>explain-project &mdash; explorable report</h1></header>
 
+<div id="viewtabs"><button id="vt-brief" class="vtab active">Brief</button><button id="vt-map" class="vtab">Map</button></div>
+<section id="briefview"></section>
+
+<div id="mapview">
 <div id="banner" aria-label="coverage"></div>
 <div id="perspectives" aria-label="perspectives"></div>
 <div id="pdesc"></div>
@@ -122,6 +163,7 @@
   <span><b>Edges:</b> labeled relationships (narrative)</span>
   <span><b>Tier:</b> nodes drill down into children</span>
   <span><b>Lens:</b> switch perspective above; <i>Verified only</i> hides interpretation</span>
+</div>
 </div>
 
 <div id="toast"></div>
@@ -171,6 +213,7 @@
   var nodeById = {};        // rebuilt per perspective
   var stack = [];           // breadcrumb of parent node ids; [] === tier-0 view
   var cy = null;
+  var cyInited = false;     // lazy graph init: #cy starts hidden (zero-size)
 
   function persp() { return PERSPECTIVES[currentPerspective]; }
   function rebuildIndex() {
@@ -528,20 +571,202 @@
     draw();
   }
 
+  // ---- View toggle (Brief / Map) -------------------------------------------
+  function ensureGraph() {
+    // #cy starts hidden (zero size); Cytoscape must be inited or resized once visible.
+    if (typeof cytoscape === "undefined") {
+      document.getElementById("offline").style.display = "block";
+      document.getElementById("cy").style.display = "none";
+      renderBreadcrumb();
+      return;
+    }
+    if (!cyInited) {
+      initGraph();
+      cyInited = true;
+    } else if (cy) {
+      cy.resize();
+      cy.fit();
+    }
+  }
+  function showMap() {
+    document.getElementById("briefview").style.display = "none";
+    document.getElementById("mapview").style.display = "";
+    document.getElementById("vt-brief").classList.remove("active");
+    document.getElementById("vt-map").classList.add("active");
+    ensureGraph();
+  }
+  function showBrief() {
+    document.getElementById("mapview").style.display = "none";
+    document.getElementById("briefview").style.display = "";
+    document.getElementById("vt-map").classList.remove("active");
+    document.getElementById("vt-brief").classList.add("active");
+  }
+
+  // ---- Business Brief ------------------------------------------------------
+  function depByName(name) {
+    var deps = FACTS.externalDependencies || [];
+    for (var i = 0; i < deps.length; i++) { if (deps[i].name === name) return deps[i]; }
+    return null;
+  }
+  function briefProvenance(refs) {
+    refs = refs || {};
+    var fileList = (refs.fileIds || []).map(fileRow).join("");
+    var modList = (refs.moduleIds || []).map(function (mid) {
+      var m = moduleById[mid];
+      return "<li><code>" + esc(m ? m.path : mid) + "</code></li>";
+    }).join("");
+    var inner = modList + fileList;
+    if (!inner) return "";
+    return '<ul class="brief-prov section">' + inner + '</ul>';
+  }
+  function askAboutBrief(key) {
+    var bb = NARRATIVE.businessBrief || {};
+    var claim = bb[key];
+    if (!claim) return;
+    var refs = claim.factRefs || {};
+    var files = (refs.fileIds || []).map(function (fid) {
+      var f = fileById[fid]; return (f ? f.path : fid) + " (" + fid + ")";
+    });
+    var mods = (refs.moduleIds || []).map(function (mid) {
+      var m = moduleById[mid]; return (m ? m.path : mid) + " (" + mid + ")";
+    });
+    var lines = [
+      "In the explain-project business brief for repo " + ((FACTS.repo || {}).root || "(this repo)") + ",",
+      "explain the \"" + key + "\" claim: " + claim.text,
+      mods.length ? ("Backing modules: " + mods.join(", ")) : "",
+      files.length ? ("Backing files: " + files.join(", ")) : "",
+      "Confidence: " + claim.confidence + (claim.interpretation ? " (interpretation)" : ""),
+      "",
+      "My question: "
+    ];
+    copyText(lines.filter(function (l) { return l !== ""; }).join("\n"));
+  }
+  function briefClaimBlock(heading, key, claim) {
+    if (!claim) return "";
+    var html = '<div class="brief-section"><h3>' + esc(heading) + '</h3>';
+    if (hidden(claim)) {
+      html += '<p class="brief-muted">(hidden by Verified-only)</p></div>';
+      return html;
+    }
+    var conf = esc(claim.confidence || "");
+    html += '<p>' + esc(claim.text) + '</p>';
+    html += '<div><span class="badge ' + conf + '">' + conf + '</span>' +
+            (claim.interpretation ? ' <span class="badge interp">interpretation</span>' : '') +
+            ' <span class="chip" data-askbrief="' + esc(key) + '">Ask about this</span></div>';
+    html += briefProvenance(claim.factRefs);
+    html += '</div>';
+    return html;
+  }
+  function renderBrief() {
+    var host = document.getElementById("briefview");
+    var bb = NARRATIVE.businessBrief;
+    if (!bb) {
+      host.innerHTML = '<p class="brief-muted">No business brief was generated for this repo.</p>';
+      return false;
+    }
+    var repo = FACTS.repo || {};
+    var er = FACTS.extractionReport || {};
+    var langs = er.languagesDetected || [];
+    var stats = [
+      { num: repo.totalFiles != null ? repo.totalFiles : "—", lbl: "Files" },
+      { num: repo.totalLoc != null ? repo.totalLoc : "—", lbl: "Lines of code" },
+      { num: (FACTS.modules || []).length, lbl: "Modules" },
+      { num: langs.length, lbl: "Languages" + (langs.length ? " (" + langs.join(", ") + ")" : "") },
+      { num: (FACTS.entrypoints || []).length, lbl: "Entrypoints" },
+      { num: (FACTS.externalDependencies || []).length, lbl: "Dependencies" }
+    ];
+    var statHtml = stats.map(function (s) {
+      return '<div class="stat"><div class="num">' + esc(s.num) +
+             '</div><div class="lbl">' + esc(s.lbl) + '</div></div>';
+    }).join("");
+
+    var html = '<h1 class="brief-headline">' + esc(bb.headline) + '</h1>';
+    html += '<div class="stat-grid">' + statHtml + '</div>';
+    html += briefClaimBlock("Problem", "problem", bb.problem);
+    html += briefClaimBlock("Solution", "solution", bb.solution);
+    html += briefClaimBlock("Audience", "audience", bb.audience);
+    if (bb.howItWorks) {
+      html += '<div class="brief-section"><h3>How it works</h3><p>' + esc(bb.howItWorks) + '</p></div>';
+    }
+
+    // Capabilities
+    var caps = (bb.capabilities || []).filter(function (c) { return !hidden(c); });
+    if (caps.length) {
+      var cards = caps.map(function (c, i) {
+        var conf = esc(c.confidence || "");
+        var linkable = c.perspectiveRef && c.nodeRef;
+        var cls = "cap-card " + conf + (linkable ? " clickable" : "");
+        return '<div class="' + cls + '"' +
+               (linkable ? ' data-pref="' + esc(c.perspectiveRef) + '" data-nref="' + esc(c.nodeRef) + '"' : '') +
+               '><h4>' + esc(c.label) + '</h4><p>' + esc(c.text) + '</p>' +
+               '<span class="badge ' + conf + '">' + conf + '</span>' +
+               (c.interpretation ? ' <span class="badge interp">interpretation</span>' : '') +
+               '</div>';
+      }).join("");
+      html += '<div class="brief-section"><h3>Capabilities</h3><div class="cap-grid">' + cards + '</div></div>';
+    }
+
+    // Tech stack
+    var ts = bb.techStack || [];
+    if (ts.length) {
+      var groups = {};
+      var order = [];
+      ts.forEach(function (t) {
+        var role = t.role || "other";
+        if (!groups[role]) { groups[role] = []; order.push(role); }
+        groups[role].push(t);
+      });
+      var techHtml = order.map(function (role) {
+        var chips = groups[role].map(function (t) {
+          var dep = depByName(t.factRef);
+          var ver = dep && dep.version ? " " + dep.version : "";
+          return '<span class="chip">' + esc(t.name) + esc(ver) + '</span>';
+        }).join("");
+        return '<div class="tech-group"><span class="role">' + esc(role) + '</span>' + chips + '</div>';
+      }).join("");
+      html += '<div class="brief-section"><h3>Tech stack</h3>' + techHtml + '</div>';
+    }
+
+    host.innerHTML = html;
+    Array.prototype.forEach.call(host.querySelectorAll("[data-view]"), function (el) {
+      el.addEventListener("click", function () { openCodeViewer(el.getAttribute("data-view")); });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll("[data-askbrief]"), function (el) {
+      el.addEventListener("click", function () { askAboutBrief(el.getAttribute("data-askbrief")); });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll(".cap-card.clickable"), function (el) {
+      el.addEventListener("click", function () {
+        var pid = el.getAttribute("data-pref"), nref = el.getAttribute("data-nref");
+        var idx = -1;
+        PERSPECTIVES.forEach(function (p, i) { if (p.id === pid) idx = i; });
+        if (idx >= 0) setPerspective(idx);
+        showMap();
+        renderPanel(nref);
+      });
+    });
+    return true;
+  }
+
+  document.getElementById("vt-brief").addEventListener("click", function () { showBrief(); });
+  document.getElementById("vt-map").addEventListener("click", function () { showMap(); });
+
   document.getElementById("back").addEventListener("click", function () {
     if (stack.length) { stack.pop(); draw(); }
   });
-  document.getElementById("verifiedOnly").addEventListener("change", draw);
+  document.getElementById("verifiedOnly").addEventListener("change", function () {
+    draw();
+    if (document.getElementById("briefview").style.display !== "none") renderBrief();
+  });
 
   // ---- Boot ----------------------------------------------------------------
   rebuildIndex();
   renderSwitcher();
-  if (typeof cytoscape === "undefined") {
-    document.getElementById("offline").style.display = "block";
-    document.getElementById("cy").style.display = "none";
-    renderBreadcrumb();
+  renderBreadcrumb();
+  var hasBrief = renderBrief();
+  if (hasBrief) {
+    showBrief();
   } else {
-    initGraph();
+    showMap();
   }
 })();
 </script>
