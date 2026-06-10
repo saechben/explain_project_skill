@@ -1,6 +1,7 @@
 """Parse dependency manifests and detect declared entrypoints.
 
-Supports (v1): package.json (npm), pyproject.toml (pypi), requirements.txt (pypi).
+Supports: package.json (npm), pyproject.toml — both PEP 621 [project] and Poetry
+[tool.poetry] tables (pypi) — and requirements.txt (pypi).
 Returns (external_dependencies, entrypoints) shaped like facts.schema.json items.
 Deterministic: deps sorted by name, entrypoints sorted by fileId.
 """
@@ -26,6 +27,16 @@ def _py_version(token: str) -> str | None:
     """Best-effort version from a requirement string ('flask==2.0' -> '2.0')."""
     m = re.search(r"==\s*([^\s;,]+)", token)
     return m.group(1) if m else None
+
+
+def _poetry_version(spec) -> str | None:
+    """Version from a Poetry dependency spec: a string ('^1.9') or a table ({version: ...})."""
+    if isinstance(spec, str):
+        return spec or None
+    if isinstance(spec, dict):
+        v = spec.get("version")
+        return v if isinstance(v, str) and v else None
+    return None
 
 
 def _dep(name: str, version: str | None, ecosystem: str, manifest: str) -> dict:
@@ -102,12 +113,16 @@ def _collect_pyproject(path: pathlib.Path, manifest: str, file_index: FileIndex)
     except (OSError, ValueError):
         return deps, entrypoints
 
+    seen: set[str] = set()
+
+    # PEP 621 — [project.dependencies] (list of PEP 508 strings).
     project = data.get("project") if isinstance(data.get("project"), dict) else {}
     for token in project.get("dependencies", []) or []:
         if not isinstance(token, str):
             continue
         name = _py_name(token)
-        if name:
+        if name and name not in seen:
+            seen.add(name)
             deps.append(_dep(name, _py_version(token), "pypi", manifest))
 
     scripts = project.get("scripts") if isinstance(project.get("scripts"), dict) else {}
@@ -119,6 +134,38 @@ def _collect_pyproject(path: pathlib.Path, manifest: str, file_index: FileIndex)
         if fid is not None:
             entrypoints.append(
                 {"fileId": fid, "kind": "cli", "evidence": f"pyproject [project.scripts]: {value}"}
+            )
+
+    # Poetry — [tool.poetry.*] (dependency tables keyed by name; specs are str or table).
+    tool = data.get("tool") if isinstance(data.get("tool"), dict) else {}
+    poetry = tool.get("poetry") if isinstance(tool.get("poetry"), dict) else {}
+
+    dep_tables = [poetry.get("dependencies"), poetry.get("dev-dependencies")]
+    groups = poetry.get("group") if isinstance(poetry.get("group"), dict) else {}
+    for group in groups.values():
+        if isinstance(group, dict):
+            dep_tables.append(group.get("dependencies"))
+    for table in dep_tables:
+        if not isinstance(table, dict):
+            continue
+        for name, spec in table.items():
+            if name == "python":  # interpreter constraint, not a package
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            deps.append(_dep(name, _poetry_version(spec), "pypi", manifest))
+
+    poetry_scripts = poetry.get("scripts") if isinstance(poetry.get("scripts"), dict) else {}
+    for value in poetry_scripts.values():
+        if not isinstance(value, str):
+            continue
+        module = value.split(":", 1)[0].strip()
+        fid = _resolve_module(module, file_index)
+        if fid is not None and not any(e["fileId"] == fid for e in entrypoints):
+            entrypoints.append(
+                {"fileId": fid, "kind": "cli",
+                 "evidence": f"pyproject [tool.poetry.scripts]: {value}"}
             )
     return deps, entrypoints
 

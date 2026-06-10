@@ -81,3 +81,67 @@ def test_deps_sorted_by_name(js_app):
     deps, _ = collect(js_app, idx)
     names = [d["name"] for d in deps]
     assert names == sorted(names)
+
+
+def test_poetry_dependencies(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "x"\n\n'
+        "[tool.poetry.dependencies]\n"
+        'python = "^3.9"\n'
+        'fastapi = "^0.79.1"\n'
+        'pydantic = { version = "^1.9", extras = ["email"] }\n'
+    )
+    idx = _index([])
+    deps, _ = collect(tmp_path, idx)
+    names = {d["name"] for d in deps}
+
+    assert "fastapi" in names
+    assert "pydantic" in names
+    # `python` is the interpreter constraint, not a package dependency.
+    assert "python" not in names
+
+    fa = next(d for d in deps if d["name"] == "fastapi")
+    assert fa["ecosystem"] == "pypi"
+    assert fa["manifest"] == "pyproject.toml"
+    assert fa["version"] == "^0.79.1"
+
+    # Version pulled from the inline table form.
+    pd = next(d for d in deps if d["name"] == "pydantic")
+    assert pd["version"] == "^1.9"
+
+
+def test_poetry_dev_dependencies(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "x"\n\n'
+        "[tool.poetry.dev-dependencies]\n"
+        'pytest = "^7.1"\n'
+    )
+    idx = _index([])
+    deps, _ = collect(tmp_path, idx)
+    assert "pytest" in {d["name"] for d in deps}
+
+
+def test_poetry_scripts_entrypoint(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "x"\n\n'
+        "[tool.poetry.scripts]\n"
+        'mycli = "pkg.cli:main"\n'
+    )
+    idx = _index(["pkg/cli.py"])
+    _, entrypoints = collect(tmp_path, idx)
+    fid = idx.id_for_path("pkg/cli.py")
+    assert any(e["fileId"] == fid and e["kind"] == "cli" for e in entrypoints), entrypoints
+
+
+def test_pep621_still_preferred_over_poetry(tmp_path):
+    # A project may carry both tables; both contribute, no crash, deduped by name.
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'x'\ndependencies = ['requests>=2.0']\n\n"
+        "[tool.poetry.dependencies]\nfastapi = '^0.79'\n"
+    )
+    idx = _index([])
+    deps, _ = collect(tmp_path, idx)
+    names = [d["name"] for d in deps]
+    assert "requests" in names
+    assert "fastapi" in names
+    assert len(names) == len(set(names)), f"duplicate dep names: {names}"

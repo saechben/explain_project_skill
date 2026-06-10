@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from contract import FileIndex  # noqa: E402
-from extractors import filetree, manifests, git_signals, imports  # noqa: E402
+from extractors import filetree, manifests, git_signals, imports, webapps  # noqa: E402
 
 SCHEMA_VERSION = "1.0"
 
@@ -78,8 +78,11 @@ def extract(repo_root: Path, focus: str | None = None, extra_skip: list[str] | N
         if f.id in last_modified_by_id:
             f.lastModified = last_modified_by_id[f.id]
 
-    # Phase 1c: manifests + entrypoints.
+    # Phase 1c: manifests + entrypoints. Manifest-declared entrypoints win; web-app
+    # objects (uvicorn/gunicorn-launched ASGI/WSGI apps) backfill files not already claimed.
     external_deps, entrypoints = manifests.collect(repo_root, index)
+    declared = {e["fileId"] for e in entrypoints}
+    entrypoints.extend(e for e in webapps.collect(repo_root, index) if e["fileId"] not in declared)
 
     # Phase 1d: import graph (sole edge producer; owns edge IDs).
     edges = imports.collect(repo_root, index)
