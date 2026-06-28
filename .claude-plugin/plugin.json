@@ -1,6 +1,21 @@
 {
   "name": "explain-project",
+  "displayName": "Explain Project",
   "version": "0.1.0",
   "description": "Turn any repository into an interactive, multi-level HTML map: deterministic static analysis extracts the real skeleton, Claude groups and labels it with provenance, and a verifier blocks any hallucinated structure.",
-  "author": "Benjamin"
+  "author": {
+    "name": "Benjamin",
+    "email": "benjaminsaechew@gmail.com",
+    "url": "https://github.com/saechben"
+  },
+  "homepage": "https://github.com/saechben/explain_project_skill",
+  "repository": "https://github.com/saechben/explain_project_skill",
+  "keywords": [
+    "codebase",
+    "architecture",
+    "visualization",
+    "static-analysis",
+    "documentation",
+    "code-map"
+  ]
 }

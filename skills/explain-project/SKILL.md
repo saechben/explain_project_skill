@@ -21,8 +21,23 @@ carries `factEdgeIds`. Interpretation is labeled (`confidence`, `interpretation`
 
 Scripts are under `scripts/` in this skill. They need Python 3.11+ and the deps in the
 plugin's `requirements.txt` (`pathspec`, `pyyaml`, `tree-sitter`,
-`tree-sitter-language-pack`). If imports fail, install them into a venv and use that
-interpreter for every script call below. Run scripts with that interpreter.
+`tree-sitter-language-pack`). `requirements.txt` lives at the plugin root (two levels
+up from this skill). If imports fail, create an isolated environment from it. Prefer
+[`uv`](https://docs.astral.sh/uv/) when it is installed (much faster); otherwise fall
+back to the stdlib `venv`. Both create `.venv` in the skill directory:
+
+```bash
+# run from this skill directory
+REQ=../../requirements.txt
+if command -v uv >/dev/null 2>&1; then
+  uv venv .venv && uv pip install --python .venv -r "$REQ"
+else
+  python3 -m venv .venv && .venv/bin/pip install -r "$REQ"
+fi
+```
+
+Then run **every** script call below with that interpreter, e.g.
+`.venv/bin/python scripts/extract.py ...`.
 
 Outputs land in `<repo>/.explain-project/` (`facts.json`, `narrative.json`,
 `report.html`, `verify.report.json`).

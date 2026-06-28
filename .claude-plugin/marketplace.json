@@ -1,0 +1,16 @@
+{
+  "name": "explain-project-marketplace",
+  "description": "Local marketplace hosting the explain-project plugin.",
+  "owner": {
+    "name": "Benjamin",
+    "email": "benjaminsaechew@gmail.com",
+    "url": "https://github.com/saechben"
+  },
+  "plugins": [
+    {
+      "name": "explain-project",
+      "source": "./",
+      "description": "Turn any repository into an interactive, multi-level HTML map grounded in deterministic static analysis with a hallucination-blocking verifier."
+    }
+  ]
+}
