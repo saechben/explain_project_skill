@@ -108,6 +108,29 @@ def test_js_resolution(js_app):
     assert missing and all(e["to"] is None for e in missing)
 
 
+def test_src_layout_cross_boundary_resolved(fixtures_dir):
+    """Absolute imports from outside a src-rooted package resolve end-to-end."""
+    src_app = fixtures_dir / "py_src_app"
+    idx = build_index(src_app)
+    edges = collect(src_app, idx)
+    by_id = {r.id: r.path for r in idx.records}
+
+    main_targets = {by_id[e["to"]] for e in edges_for(edges, "cli/main.py")
+                    if e["to"] is not None}
+    assert "src/app/config.py" in main_targets
+    assert "src/app/core.py" in main_targets
+
+    # stdlib import stays unresolved
+    json_edge = [e for e in edges_for(edges, "cli/main.py")
+                 if "import json" in e["evidence"]["raw"]]
+    assert json_edge and all(e["to"] is None for e in json_edge)
+
+    # relative intra-package import still resolves (regression)
+    core_targets = {by_id[e["to"]] for e in edges_for(edges, "src/app/core.py")
+                    if e["to"] is not None}
+    assert "src/app/config.py" in core_targets
+
+
 def test_schema_fields(py_app):
     idx = build_index(py_app)
     edges = collect(py_app, idx)
